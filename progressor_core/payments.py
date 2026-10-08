@@ -76,6 +76,9 @@ async def reconcile_pending(engine):
             logging.getLogger('progressor').warning('rub_reconcile_unavailable')
 
 async def invoice(engine,order):
+    import json
+    if order['status']!='pending' or order['currency']!='XTR':raise ValueError('order_not_pending_stars')
+    if order.get('pricing_json') and utc(json.loads(order['pricing_json'])['quote_valid_until'])<=utc():raise ValueError('checkout_expired')
     token=engine.config.bot_tokens.get(order['source'])
     if not token: raise ValueError('bot_not_configured')
     async with httpx.AsyncClient(timeout=8,trust_env=False) as client:
@@ -85,6 +88,7 @@ async def invoice(engine,order):
     return body['result']
 
 async def create_rub(engine,order,email):
+    import json
     if not isinstance(email,str) or not re.fullmatch(r'[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,30}',email): raise ValueError('invalid_receipt_email')
     if order['status']!='pending': raise ValueError('order_not_pending')
     if time.time()-utc(order['created_at']).timestamp()>=23*3600: raise ValueError('uncertain_payment_requires_support')
@@ -104,6 +108,7 @@ async def create_rub(engine,order,email):
         original_email=contact['email'] if contact else ((body.get('receipt') or {}).get('customer') or {}).get('email')
         if original_email!=email:raise ValueError('immutable_receipt_email')
     else:
+        if order.get('pricing_json') and utc(json.loads(order['pricing_json'])['quote_valid_until'])<=utc():raise ValueError('checkout_expired')
         # Match the selected existing merchant's receipt mode before the first provider POST.
         # This GET creates no payment; an uncertain/disabled shop never starts a charge.
         merchant=await yookassa(engine.config,'GET','me')
@@ -115,6 +120,8 @@ async def create_rub(engine,order,email):
         else:body.pop('receipt')
     with engine.store.connection() as db:
         db.execute('BEGIN IMMEDIATE')
+        current=db.execute('SELECT status FROM bundle_orders WHERE id=?',(order['id'],)).fetchone()
+        if not current or current['status']!='pending':raise ValueError('order_not_pending')
         old=db.execute('SELECT payload FROM bundle_provider_requests WHERE order_id=?',(order['id'],)).fetchone()
         if old:
             stored=json.loads(old['payload'])
@@ -191,8 +198,22 @@ def install_routes(app,engine,claims):
 
     @app.post('/internal/v1/grants')
     async def grants(request:Request):
-        _,body=await private(request)
-        return engine(request).billing.grants(str(body.get('after','')))
+        source,body=await private(request)
+        return engine(request).billing.grants(str(body.get('after','')),source)
+
+    @app.post('/internal/v1/subscription-notices/claim')
+    async def claim_notices(request:Request):
+        import asyncio
+        source,body=await private(request)
+        try:return await asyncio.to_thread(engine(request).subscription_notices.claim,source,str(body.get('after','')))
+        except (KeyError,ValueError,TypeError):raise HTTPException(422,'Invalid notification request')
+
+    @app.post('/internal/v1/subscription-notices/ack')
+    async def ack_notice(request:Request):
+        import asyncio
+        source,body=await private(request)
+        try:return await asyncio.to_thread(engine(request).subscription_notices.acknowledge,source,body['event_key'],body['status'],body.get('retry_after',0))
+        except (KeyError,ValueError,TypeError):raise HTTPException(409,'Notification acknowledgement rejected')
 
     @app.post('/internal/v1/bundle/quote')
     async def quote(request:Request):
@@ -203,8 +224,25 @@ def install_routes(app,engine,claims):
 
     @app.post('/internal/v1/bundle/catalog')
     async def private_catalog(request:Request):
-        await private(request)
-        return engine(request).billing.catalog()
+        _,body=await private(request)
+        if 'user_id' not in body:return engine(request).billing.catalog()
+        try:return engine(request).billing.personal_catalog(body['user_id'])
+        except (KeyError,ValueError,TypeError):raise HTTPException(503,'Personal pricing temporarily unavailable')
+
+    @app.post('/internal/v1/bundle/cancel')
+    async def cancel_order(request:Request):
+        _,body=await private(request)
+        try:return engine(request).billing.cancel(body['user_id'],body['order_id'])
+        except (KeyError,ValueError,TypeError):raise HTTPException(409,'Payment already processing')
+
+    @app.post('/internal/v1/bot-context')
+    async def bot_context(request:Request):
+        source,body=await private(request)
+        from .context import build_context
+        try:
+            data=build_context(engine(request).store,subject(body['user_id']),target=source,enabled_sources=engine(request).config.enabled_domains)
+            return {k:data.get(k) for k in ('inline_hint','access','activity','nutrition','profile')}
+        except (KeyError,ValueError,TypeError):raise HTTPException(422,'Invalid identity')
 
     @app.post('/internal/v1/bundle/precheckout')
     async def precheckout(request:Request):
@@ -212,6 +250,25 @@ def install_routes(app,engine,claims):
         source,body=await private(request)
         try: return engine(request).billing.precheckout(body,source)
         except (KeyError,ValueError,TypeError): raise HTTPException(409,'Checkout rejected')
+
+    @app.post('/internal/v1/bundle/precheckout-rejected')
+    async def precheckout_rejected(request:Request):
+        available(request);source,body=await private(request)
+        try:return engine(request).billing.precheckout_rejected(subject(body['user_id']),body['order_id'],body['checkout_id'],source)
+        except (KeyError,ValueError,TypeError):raise HTTPException(409,'Checkout rejection mismatch')
+
+    @app.post('/internal/v1/bundle/invoice-link')
+    async def bot_invoice_link(request:Request):
+        available(request);source,body=await private(request)
+        try:
+            order=engine(request).billing.order(body['order_id'],subject(body['user_id']))
+            if order['source']!=source or order['currency']!='XTR' or order['status']!='pending':raise ValueError('invoice_owner_mismatch')
+            if order.get('pricing_json'):
+                import json
+                if utc(json.loads(order['pricing_json'])['quote_valid_until'])<=utc():raise ValueError('checkout_expired')
+            return {'order_id':order['id'],'invoice_url':await invoice(engine(request),order)}
+        except (KeyError,ValueError,TypeError):raise HTTPException(409,'Invoice rejected')
+        except httpx.HTTPError:raise HTTPException(503,'Invoice temporarily unavailable')
 
     @app.post('/internal/v1/bundle/receipt')
     async def paid(request:Request):
@@ -221,6 +278,18 @@ def install_routes(app,engine,claims):
 
     @app.get('/api/v1/bundle/catalog')
     def catalog(request:Request): return {**engine(request).billing.catalog(),'rub_available':bool(engine(request).config.yookassa_shop and engine(request).config.yookassa_key)}
+
+    @app.get('/api/v1/me/bundle/catalog')
+    def personal_catalog(request:Request):
+        user=claims(request)
+        try:return engine(request).billing.personal_catalog(user['sub'])
+        except (KeyError,ValueError,TypeError):raise HTTPException(503,'Personal pricing temporarily unavailable')
+
+    @app.post('/api/v1/me/bundle/cancel')
+    async def cancel_personal(request:Request):
+        user=claims(request);body=await request.json()
+        try:return engine(request).billing.cancel(user['sub'],body['order_id'])
+        except (KeyError,ValueError,TypeError):raise HTTPException(409,'Payment already processing')
 
     @app.post('/api/v1/me/bundle/invoice')
     async def buy_stars(request:Request):
@@ -288,6 +357,18 @@ def install_routes(app,engine,claims):
             return {'order_id':order['id'],'confirmation_url':url}
         except (KeyError,ValueError,TypeError): raise HTTPException(409,'Checkout rejected')
         except httpx.HTTPError: raise HTTPException(503,'Payment temporarily unavailable; retry the same order')
+
+    @app.post('/api/v1/website/catalog')
+    def website_catalog(request:Request):
+        user=web_claims(request)
+        try:return {**engine(request).billing.personal_catalog(user['sub']),'rub_available':bool(engine(request).config.yookassa_shop and engine(request).config.yookassa_key)}
+        except (KeyError,ValueError,TypeError):raise HTTPException(503,'Personal pricing temporarily unavailable')
+
+    @app.post('/api/v1/website/cancel')
+    async def website_cancel(request:Request):
+        user=web_claims(request);body=await request.json()
+        try:return engine(request).billing.cancel(user['sub'],body['order_id'])
+        except (KeyError,ValueError,TypeError):raise HTTPException(409,'Payment already processing')
 
     @app.post('/api/v1/website/status')
     async def website_status(request:Request):

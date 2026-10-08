@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Coordinated main deployment. Never restore databases during code recovery."""
 import argparse
+import ast
 import base64
 import fcntl
 import hashlib
@@ -53,7 +54,8 @@ DBS = {'gym': Path('/srv/gym_diary_prod/gymdiary.db'),
        'core': Path('/var/lib/progressor/core.sqlite3')}
 INCOMPLETE = {'stopping', 'switching', 'starting', 'verifying', 'promoting', 'rolling_back'}
 HELPERS = {'domain_bridge.py': 'progressor_bridge.py', 'progressor_client.py': 'progressor_client.py',
-           'progressor_bot.py': 'progressor_bot.py', 'ai_guard.py': 'progressor_ai_guard.py'}
+           'progressor_bot.py': 'progressor_bot.py', 'ai_guard.py': 'progressor_ai_guard.py',
+           'native_subscription.py':'progressor_native_subscription.py'}
 
 
 class UpdateError(RuntimeError):
@@ -70,6 +72,37 @@ def sha(path):
         for block in iter(lambda: f.read(1024 * 1024), b''):
             d.update(block)
     return d.hexdigest()
+
+
+def financial_epoch_required(path):
+    """A v2 gate or any frozen v2 order forbids an incompatible rollback."""
+    path=Path(path)
+    if (path.parent/'bundle-v2-ready').exists():return True
+    if not path.is_file():return False
+    try:
+        with sqlite3.connect(path.resolve().as_uri()+'?mode=ro',uri=True) as db:
+            cols={r[1] for r in db.execute('PRAGMA table_info(bundle_orders)')}
+            return 'pricing_json' in cols and db.execute('SELECT 1 FROM bundle_orders WHERE pricing_json IS NOT NULL LIMIT 1').fetchone() is not None
+    except sqlite3.Error:raise UpdateError('financial_ledger_unavailable')
+
+
+def protocol_constant(path,name):
+    try:
+        tree=ast.parse(Path(path).read_text())
+        for node in tree.body:
+            if isinstance(node,ast.Assign) and any(isinstance(t,ast.Name) and t.id==name for t in node.targets):
+                if isinstance(node.value,ast.Constant) and type(node.value.value) is int:return node.value.value
+    except (OSError,SyntaxError):pass
+    return 0
+
+
+def check_financial_epoch(candidates,db_path):
+    if not financial_epoch_required(db_path):return
+    if protocol_constant(candidates['core']/'progressor_core/billing.py','FINANCIAL_PROTOCOL')<2:
+        raise UpdateError('incompatible_financial_protocol:core')
+    for name in ('gym','food','supply'):
+        if protocol_constant(candidates[name]/'progressor_client.py','FINANCIAL_SCHEDULE')<2:
+            raise UpdateError('incompatible_financial_schedule:'+name)
 
 
 def atomic_json(path, value):
@@ -307,6 +340,7 @@ class Updater:
         self.save()
 
     def check_helpers(self):
+        check_financial_epoch(self.candidates,DBS['core'])
         for name in ('gym', 'food', 'supply'):
             mapping = {**HELPERS, **({'workout_metrics.py': 'progressor_workout_metrics.py'} if name == 'gym' else {})}
             if name=='food' and (self.candidates['core']/'shared'/'nutrition_plan.py').is_file():
@@ -367,7 +401,7 @@ class Updater:
                 try: compile(file.read_bytes(), str(file), 'exec')
                 except Exception: raise UpdateError('candidate_syntax_error:' + name + '/' + str(file.relative_to(source)))
             selections = [('gymdiary.service', 'test_subscriptions.py'), ('gymdiary_webapp_prod.service', 'test_progressor_context.py'),
-                          ('gymdiary_webapp_prod.service', 'test_native_controls.py')] if name == 'gym' else [
+                          ('gymdiary_webapp_prod.service', 'test_native_controls.py'),('gymdiary.service','test_bot_native.py')] if name == 'gym' else [
                           ('progressor_core.service' if name == 'core' else name + '_bot.service', None)]
             emit('Проверяю новую версию: ' + REPOS[name]['title'] + '…')
             for i, (unit, pattern) in enumerate(selections):

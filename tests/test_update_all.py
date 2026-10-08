@@ -34,6 +34,7 @@ class CoordinatedUpdate(unittest.TestCase):
             self.stack.enter_context(patch.object(up, name, value))
         self.repos = {n: {**s, 'path': self.root / 'repositories' / n} for n, s in up.REPOS.items()}
         self.stack.enter_context(patch.object(up, 'REPOS', self.repos))
+        self.stack.enter_context(patch.object(up,'DBS',{name:self.root/(name+'.sqlite3') for name in up.DBS}))
         self.stack.enter_context(patch.object(up, 'emit'))
         self.u = up.Updater(); self.u.folder.mkdir(parents=True)
 

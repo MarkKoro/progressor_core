@@ -18,3 +18,6 @@ Canonical Core source is now [MarkKoro/progressor_core](https://github.com/MarkK
 Read docs/UPDATE_ALL.md before rollout changes. deploy/update_all.py is the sole deployment transaction engine; update_progressor.py delegates with --only core. Never restore live databases during recovery or modify an existing runtime in place. Include both Food APIs and Supply worker when active. A busy paid worker must finish before switching; an aborted drain must not kill that job. update_all_bots belongs to unrelated products.
 
 For native subscription examples, both exercise surfaces, profile reconciliation, deterministic nutrition plans and opt-in Food reminders, also read [docs/NATIVE_GROWTH.md](docs/NATIVE_GROWTH.md). Source data stay owner-local; do not add a consumer, diagnose from incomplete logs or retry uncertain Telegram delivery. Canonical nutrition_plan.py is mirrored only to Food and must match.
+
+
+Native Telegram subscriptions and expiry: read [docs/BOT_NATIVE.md](docs/BOT_NATIVE.md) before payment grants/tariffs, source schedules, notifications or native menus. Canonical native_subscription helper requires synchronized all3 mirrors. After v2 gate/order, forbid Core protocol<2 or client schedule<2 rollback. Always preserve financial/user DB records; use native renderers and defer busy flows.

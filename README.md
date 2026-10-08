@@ -52,7 +52,7 @@ Override `PROGRESSOR_PRICE_{M1,M3,M6,Y1}_{RUB,XTR}`; RUB values are kopecks. No 
 Digital products inside Telegram use XTR exclusively. `/progressor` and the shared WebApp panel
 offer all plans from each existing bot. RUB checkout is on `/progressor/subscribe` in a separate
 browser, with explicit existing-bot login confirmation and receipt email. The dedicated website
-session cannot be replaced by a mini-app assertion. Terms version is `progressor.bundle.v1`.
+session cannot be replaced by a mini-app assertion. New personal terms version is `progressor.bundle.v2`; earlier v1 receipts remain valid. See [native subscriptions](docs/BOT_NATIVE.md) for paid-period credit and first-rollout readiness gate.
 Configure `PROGRESSOR_YOOKASSA_SHOP_ID/SECRET_KEY/VAT_CODE` using the selected existing merchant;
 different product merchants must not be silently treated as the same account. Preserve the original
 YooKassa request and idempotence key when the creation response is lost. Retry creation only within

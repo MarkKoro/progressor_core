@@ -5,7 +5,8 @@ from pathlib import Path
 
 CORE = Path(__file__).resolve().parents[1]
 FILES = {'domain_bridge.py': 'progressor_bridge.py', 'progressor_client.py': 'progressor_client.py',
-         'progressor_bot.py': 'progressor_bot.py', 'ai_guard.py': 'progressor_ai_guard.py'}
+         'progressor_bot.py': 'progressor_bot.py', 'ai_guard.py': 'progressor_ai_guard.py',
+         'native_subscription.py':'progressor_native_subscription.py'}
 
 
 def main():

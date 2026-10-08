@@ -86,15 +86,29 @@
     box = element('section', undefined, panel); box.id = 'progressor-bundle';
     const notice = element('p', 'Загрузка тарифов…', box);
     try {
-      const response = await window.fetch('/progressor/api/v1/bundle/catalog', {cache:'no-store'});
+      const response = await window.fetch('/progressor/api/v1/me/bundle/catalog', {cache:'no-store'});
       if (!response.ok) throw new Error('unavailable');
       const catalog = await response.json();
       notice.textContent = 'Тренировки, питание и БАДы. Без автопродления. ' + catalog.limits;
       const accepted = element('label', undefined, box); const checkbox = element('input', undefined, accepted); checkbox.type = 'checkbox';
       accepted.append(document.createTextNode(' Принимаю условия общей подписки'));
       const state = element('p', '', box);
+      if (catalog.pending_order) {
+        state.textContent = 'Есть неоплаченный счёт. Чтобы выбрать другой срок, сначала отмените его. Если деньги списаны, дождитесь подтверждения.';
+        if (!catalog.pending_order.checkout_id && !catalog.pending_order.provider_id) {
+          const cancel = element('button', 'Отменить неоплаченный счёт', box); cancel.type = 'button';
+          cancel.onclick = async () => {
+            cancel.disabled = true;
+            const response = await window.fetch('/progressor/api/v1/me/bundle/cancel', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:catalog.pending_order.id})});
+            if (response.ok) {box.remove();await openBundle(panel);}
+            else {state.textContent='Платёж уже проверяется. Если деньги списаны, повторно оплачивать не нужно.';cancel.disabled=false;}
+          };
+        }
+      }
       for (const plan of catalog.plans) {
-        const button = element('button', `${plan.label} · ${plan.XTR} ⭐`, box); button.type = 'button'; button.disabled = true;
+        const price=plan.prices.XTR;
+        if (price.already_covered) {element('p', `${plan.label}: три продукта уже доступны по оплаченным подпискам.`,box);continue;}
+        const button = element('button', `${plan.label} · ${plan.XTR} ⭐${price.credit_amount ? ' (зачтено '+price.credit_amount+' ⭐)' : ''}`, box); button.type = 'button'; button.disabled = true;
         checkbox.addEventListener('change', () => { button.disabled = !checkbox.checked; });
         button.addEventListener('click', async () => {
           if (!checkbox.checked) return; button.disabled = true;
@@ -105,14 +119,14 @@
             const data = await invoice.json();
             const completed = async () => {
               state.textContent = 'Проверяем подтверждение оплаты…';
-              const result = await window.fetch('/progressor/api/v1/me/bundle/orders/' + encodeURIComponent(orderId),{cache:'no-store'});
+              const result = await window.fetch('/progressor/api/v1/me/bundle/orders/' + encodeURIComponent(data.order_id),{cache:'no-store'});
               const status = result.ok ? await result.json() : {};
               state.textContent = status.status === 'paid' ? 'Подписка подтверждена. Доступ обновится во всех разделах примерно за 30 секунд.' : 'Оплата ещё не подтверждена. Если деньги списаны, повторно оплачивать не нужно. Помощь: /paysupport в боте.';
               await bootstrap(true);
             };
             if (window.Telegram?.WebApp?.openInvoice) window.Telegram.WebApp.openInvoice(data.invoice_url, () => { completed().catch(() => { state.textContent = 'Подтверждение появится после восстановления связи. /paysupport'; }); });
             else { const link = element('a', 'Открыть счёт в Telegram', box); link.href = data.invoice_url; link.target = '_blank'; link.rel = 'noopener'; state.textContent = 'Счёт готов. Откройте его для оплаты в Stars.'; }
-          } catch (_) { state.textContent = 'Не удалось подготовить счёт. Оплата не проведена; попробуйте позже.'; }
+          } catch (_) { state.textContent = 'Счёт сейчас недоступен. Если деньги списаны, дождитесь подтверждения; повторно оплачивать не нужно. Помощь: /paysupport.'; }
           finally { button.disabled = !checkbox.checked; }
         });
       }

@@ -22,9 +22,18 @@ def entitlements(store,user_id,now=None,entities=None):
         if entity['entity_id'].startswith('profile:') and payload.get('profile_kind') not in ('reported_health','reported_nutrition'):
             native[entity['source']]=payload.get('paid_until')
     bundle=None
+    bundle_by_source={s:None for s in SOURCES}
     with store.connection() as db:
         if db.execute("SELECT 1 FROM sqlite_master WHERE name='bundle_entitlements'").fetchone():
             row=db.execute('SELECT expires_at FROM bundle_entitlements WHERE user_id=?',(user_id,)).fetchone()
             bundle=row['expires_at'] if row else None
-    paid={source:active_until(native[source],now) or active_until(bundle,now) for source in SOURCES}
-    return {'domains':paid,'accessible_domains':[s for s in SOURCES if paid[s]],'bundle_active':active_until(bundle,now),'bundle_until':bundle if active_until(bundle,now) else None,'native_until':{s:native[s] if active_until(native[s],now) else None for s in SOURCES}}
+        has_intervals=db.execute("SELECT 1 FROM sqlite_master WHERE name='bundle_component_intervals'").fetchone()
+        if has_intervals:
+            for row in db.execute('SELECT source,starts_at,expires_at FROM bundle_component_intervals WHERE user_id=?',(user_id,)):
+                if not active_until(row['starts_at'],now) and active_until(row['expires_at'],now):
+                    current=bundle_by_source[row['source']]
+                    if not current or row['expires_at']>current:bundle_by_source[row['source']]=row['expires_at']
+        else:
+            bundle_by_source={s:bundle for s in SOURCES}
+    paid={source:active_until(native[source],now) or active_until(bundle_by_source[source],now) for source in SOURCES}
+    return {'domains':paid,'accessible_domains':[s for s in SOURCES if paid[s]],'bundle_active':active_until(bundle,now),'bundle_until':bundle if active_until(bundle,now) else None,'bundle_domains_until':bundle_by_source,'native_until':{s:native[s] if active_until(native[s],now) else None for s in SOURCES}}

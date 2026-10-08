@@ -19,6 +19,8 @@ from .contracts import SOURCES, digest, now_utc
 from .store import Store
 from .access import entitlements
 from .billing import Billing
+from .native_pricing import NativePricing
+from .subscription_notices import SubscriptionNotices
 from .payments import install_routes, reconcile_pending
 
 log = logging.getLogger('progressor')
@@ -45,11 +47,12 @@ class Config:
     yookassa_key: str = ''
     yookassa_vat: int = 1
     require_fresh_snapshots: bool = False
+    bundle_upgrade_gate: str | None = None
 
     @classmethod
     def environment(cls):
         enabled = tuple(s for s in os.environ.get('PROGRESSOR_ENABLED_DOMAINS', '').split(',') if s in SOURCES)
-        return cls(db_path=os.environ['PROGRESSOR_DB_PATH'], signing_key=Path(os.environ['PROGRESSOR_SIGNING_KEY_FILE']).read_text().strip(), source_paths={s: os.environ['PROGRESSOR_' + s.upper() + '_DB_RO'] for s in SOURCES if os.environ.get('PROGRESSOR_' + s.upper() + '_DB_RO')}, bot_tokens={s: os.environ.get('PROGRESSOR_' + s.upper() + '_BOT_TOKEN', '') for s in SOURCES}, ingest_keys={s: os.environ.get('PROGRESSOR_' + s.upper() + '_INGEST_KEY', '') for s in SOURCES}, enabled_domains=enabled,yookassa_shop=os.getenv('PROGRESSOR_YOOKASSA_SHOP_ID',''),yookassa_key=os.getenv('PROGRESSOR_YOOKASSA_SECRET_KEY',''),yookassa_vat=int(os.getenv('PROGRESSOR_YOOKASSA_VAT_CODE','1')),require_fresh_snapshots=os.getenv('PROGRESSOR_REQUIRE_FRESH_SNAPSHOTS','0')=='1')
+        return cls(db_path=os.environ['PROGRESSOR_DB_PATH'], signing_key=Path(os.environ['PROGRESSOR_SIGNING_KEY_FILE']).read_text().strip(), source_paths={s: os.environ['PROGRESSOR_' + s.upper() + '_DB_RO'] for s in SOURCES if os.environ.get('PROGRESSOR_' + s.upper() + '_DB_RO')}, bot_tokens={s: os.environ.get('PROGRESSOR_' + s.upper() + '_BOT_TOKEN', '') for s in SOURCES}, ingest_keys={s: os.environ.get('PROGRESSOR_' + s.upper() + '_INGEST_KEY', '') for s in SOURCES}, enabled_domains=enabled,yookassa_shop=os.getenv('PROGRESSOR_YOOKASSA_SHOP_ID',''),yookassa_key=os.getenv('PROGRESSOR_YOOKASSA_SECRET_KEY',''),yookassa_vat=int(os.getenv('PROGRESSOR_YOOKASSA_VAT_CODE','1')),require_fresh_snapshots=os.getenv('PROGRESSOR_REQUIRE_FRESH_SNAPSHOTS','0')=='1',bundle_upgrade_gate='/var/lib/progressor/bundle-v2-ready')
 
 
 class Engine:
@@ -58,7 +61,8 @@ class Engine:
         if len(config.signing_key) < 32 or any(Path(config.db_path).resolve() == Path(p).resolve() for p in config.source_paths.values()):
             raise ValueError('unsafe_core_configuration')
         self.store = Store(config.db_path)
-        self.billing = Billing(self.store)
+        self.billing = Billing(self.store,NativePricing(config.source_paths),config.bundle_upgrade_gate)
+        self.subscription_notices=SubscriptionNotices(self.store,config.source_paths)
         self.metrics = Counter()
 
     def poll(self):

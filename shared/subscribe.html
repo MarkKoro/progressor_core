@@ -1,6 +1,6 @@
 <!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Progressor · общая подписка</title>
 <style>body{font:16px system-ui;line-height:1.6;background:#101a2e;color:#edf2ff;margin:0;padding:24px}main{max-width:620px;margin:auto}button,a,input{font:inherit}button,a{display:inline-block;border:0;border-radius:10px;background:#2563eb;color:white;padding:12px 16px;margin:5px 5px 5px 0;text-decoration:none;cursor:pointer}button:disabled{opacity:.5;cursor:default}input[type=email]{display:block;width:100%;box-sizing:border-box;padding:12px;border-radius:8px;margin:10px 0}small{color:#bbc9df}.card{border:1px solid #46516b;border-radius:16px;padding:18px;margin:20px 0}[hidden]{display:none}</style></head>
-<body><main><h1>Progressor</h1><p>Тренировки, питание и БАДы — одна подписка на три продукта.</p><p>Без автопродления. Лимиты ИИ каждого продукта сохраняются. Отдельные подписки действуют независимо; их сроки не прибавляются к общему сроку.</p>
+<body><main><h1>Progressor</h1><p>Тренировки, питание и БАДы — одна подписка на три продукта.</p><p>Без автопродления. Лимиты ИИ каждого продукта сохраняются. Подтверждённые оплаченные дни отдельных подписок уменьшают доплату. Можно подключить остальные продукты до текущей даты окончания или выбрать новый общий период. Пробные и подарочные дни сохраняются, но не считаются оплатой.</p>
 <section class="card" id="login"><h2>Войти через Telegram</h2><p>Откройте существующий бот и подтвердите свой вход. Платёж привяжется к вашему Telegram аккаунту.</p><button id="start" type="button">Получить ссылку входа</button><div id="links"></div></section>
 <section class="card" id="checkout" hidden><h2>Общая подписка</h2><label>Email для документов об оплате<input id="email" type="email" autocomplete="email" maxlength="254" required></label><label><input id="terms" type="checkbox"> Принимаю условия общей подписки, указанные на этой странице</label><div id="plans"></div></section>
 <p id="status" role="status"></p><small>Оплата в рублях через ЮKassa на отдельном сайте. В ботах и мини-приложениях Telegram общая подписка оплачивается в Stars. Помощь по платежам: /paysupport в любом из трёх ботов.</small></main>
@@ -8,7 +8,36 @@
 (()=>{'use strict';const $=id=>document.getElementById(id),status=$('status');let token=sessionStorage.getItem('progressor.website.token')||'',timer,source=sessionStorage.getItem('progressor.website.source')||'food';
 const tgParams=new URLSearchParams(location.hash.slice(1));if(tgParams.get('tgWebAppData')||window.Telegram?.WebApp?.initData){$('login').hidden=true;status.textContent='Для оплаты внутри Telegram откройте общую подписку в мини-приложении и выберите Stars.';return;}
 async function call(path,body){const r=await fetch('/progressor/api/v1/website/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Progressor-Web':token},body:JSON.stringify(body||{}),cache:'no-store'});if(!r.ok)throw new Error(r.status===401?'Войдите снова через Telegram.':'Не удалось выполнить запрос. Если деньги списаны, повторно оплачивать не нужно; обратитесь через /paysupport.');return r.json();}
-async function showPlans(){const r=await fetch('/progressor/api/v1/bundle/catalog',{cache:'no-store'});if(!r.ok)throw new Error('Тарифы временно недоступны.');const c=await r.json();if(!c.rub_available)throw new Error('Оплата в рублях временно недоступна. Stars доступны в ботах.');$('login').hidden=true;$('checkout').hidden=false;$('plans').replaceChildren();for(const p of c.plans){const b=document.createElement('button');b.type='button';b.textContent=p.label+' · '+p.RUB/100+' ₽';b.disabled=!$('terms').checked;$('terms').addEventListener('change',()=>b.disabled=!$('terms').checked);b.onclick=async()=>{if(!$('terms').checked||!$('email').reportValidity())return;b.disabled=true;const existing=JSON.parse(sessionStorage.getItem('progressor.website.pending')||'null');const id=existing?.plan===p.id?existing.id:crypto.randomUUID();sessionStorage.setItem('progressor.website.pending',JSON.stringify({id,plan:p.id}));status.textContent='Подготовка оплаты…';try{const o=await call('checkout',{source,plan:p.id,order_id:id,email:$('email').value,terms:c.terms_version});location.assign(o.confirmation_url);}catch(e){status.textContent=e.message;b.disabled=false;}};$('plans').append(b);}}
+async function showPlans(){
+  const c=await call('catalog');
+  if(!c.rub_available)throw new Error('Оплата в рублях временно недоступна. Stars доступны в ботах.');
+  $('login').hidden=true;$('checkout').hidden=false;$('plans').replaceChildren();
+  if(c.pending_order){
+    status.textContent='Есть неоплаченный счёт. Если деньги списаны, дождитесь подтверждения. Для другого срока можно отменить счёт, который ещё не передан на оплату.';
+    if(!c.pending_order.checkout_id&&!c.pending_order.provider_id){
+      const b=document.createElement('button');b.type='button';b.textContent='Отменить неоплаченный счёт';
+      b.onclick=async()=>{b.disabled=true;try{await call('cancel',{order_id:c.pending_order.id});sessionStorage.removeItem('progressor.website.pending');await showPlans();}catch(e){status.textContent=e.message;b.disabled=false;}};
+      $('plans').append(b);
+    }
+  }
+  for(const p of c.plans){
+    const price=p.prices.RUB;
+    if(price.already_covered){const note=document.createElement('p');note.textContent=p.label+': все три продукта уже доступны по оплаченным подпискам.';$('plans').append(note);continue;}
+    const b=document.createElement('button');b.type='button';b.dataset.plan=p.id;
+    b.textContent=p.label+' · '+(p.RUB/100).toLocaleString('ru-RU')+' ₽'+(price.credit_amount?' (зачтено '+(price.credit_amount/100).toLocaleString('ru-RU')+' ₽)':'');
+    b.disabled=!$('terms').checked;
+    b.onclick=async()=>{
+      if(!$('terms').checked||!$('email').reportValidity())return;b.disabled=true;
+      let existing;try{existing=JSON.parse(sessionStorage.getItem('progressor.website.pending')||'null');}catch(_){existing=null;}
+      const id=existing?.plan===p.id?existing.id:crypto.randomUUID();
+      sessionStorage.setItem('progressor.website.pending',JSON.stringify({id,plan:p.id}));status.textContent='Подготовка оплаты…';
+      try{const o=await call('checkout',{source,plan:p.id,order_id:id,email:$('email').value,terms:c.terms_version});sessionStorage.setItem('progressor.website.pending',JSON.stringify({id:o.order_id,plan:p.id}));location.assign(o.confirmation_url);}
+      catch(e){status.textContent=e.message;b.disabled=!$('terms').checked;}
+    };
+    $('plans').append(b);
+  }
+  $('terms').onchange=()=>{for(const b of $('plans').querySelectorAll('button[data-plan]'))b.disabled=!$('terms').checked;};
+}
 $('start').onclick=async()=>{clearInterval(timer);$('start').disabled=true;try{const q=await call('login');$('links').replaceChildren();for(const [s,url]of Object.entries(q.bots)){const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener';a.textContent={gym:'Тренировки',food:'Еда',supply:'БАДы'}[s];a.onclick=()=>{source=s;sessionStorage.setItem('progressor.website.source',s);};$('links').append(a);}status.textContent='Подтвердите вход в выбранном боте и вернитесь сюда.';let n=0;timer=setInterval(async()=>{if(++n>100){clearInterval(timer);status.textContent='Ссылка входа истекла. Получите новую.';return;}try{const v=await call('poll',{challenge:q.challenge,poll_secret:q.poll_secret});if(v.approved){clearInterval(timer);token=v.token;sessionStorage.setItem('progressor.website.token',token);status.textContent='Вход подтверждён.';await showPlans();}}catch(e){clearInterval(timer);status.textContent=e.message;}},3000);}catch(e){status.textContent=e.message;}finally{$('start').disabled=false;}};
 const order=new URLSearchParams(location.search).get('order');async function paymentStatus(){try{const p=await call('status',{order_id:order});status.textContent=p.status==='paid'?'Оплата подтверждена. Общая подписка действует во всех трёх продуктах.':p.status==='refunded'?'Платёж возвращён.':p.status==='canceled'?'Оплата отменена.':'Платёж пока не подтверждён. Не оплачивайте повторно, если деньги списаны.';if(p.status!=='pending'){clearInterval(timer);sessionStorage.removeItem('progressor.website.pending');}}catch(e){clearInterval(timer);$('login').hidden=false;status.textContent=e.message;}}
 if(token){showPlans().catch(e=>{$('login').hidden=false;status.textContent=e.message;});if(order){paymentStatus();timer=setInterval(paymentStatus,5000);}}
