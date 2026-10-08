@@ -3,7 +3,8 @@
 Independent loopback FastAPI process, its own SQLite ledger, read-only source adapters.
 Canonical source: [MarkKoro/progressor_core](https://github.com/MarkKoro/progressor_core), main.
 Core application code lives only in this repository. Domain apps contain small native adapters and never import Core.
-Update from the server with `update-progressor` or `updatecore`; see [deployment](docs/DEPLOYMENT.md).
+Update all four products with `update-all`; see [coordinated deployment](docs/UPDATE_ALL.md).
+`update-progressor` / `updatecore` update Core only through the same transaction engine.
 Ownership, event versions, identity mappings and rollout are documented in every repository's
 `docs/PROGRESSOR_INTEGRATION.md`. Core user subjects are positive decimal strings, not local user IDs.
 

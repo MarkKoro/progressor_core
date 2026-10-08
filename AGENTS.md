@@ -14,3 +14,5 @@ This is the canonical Progressor Core repository. Read README.md, docs/PROGRESSO
 
 
 Canonical Core source is now [MarkKoro/progressor_core](https://github.com/MarkKoro/progressor_core), published to main. Its production updater is `update-progressor` (`updatecore`). The former Gym integrations/progressor_core package has been removed. Core application code exists only in the separate Core repository; bots contain only their native adapters and owned data/UX logic. Bot-local shared helper copies still require synchronized bot main commits and native tests. Publish bot changes directly to main with a normal fast-forward update, as requested by the owner.
+
+Read docs/UPDATE_ALL.md before rollout changes. deploy/update_all.py is the sole deployment transaction engine; update_progressor.py delegates with --only core. Never restore live databases during recovery or modify an existing runtime in place. Include both Food APIs and Supply worker when active. A busy paid worker must finish before switching; an aborted drain must not kill that job. update_all_bots belongs to unrelated products.

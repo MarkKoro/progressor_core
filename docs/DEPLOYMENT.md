@@ -29,7 +29,8 @@
 
 Код доступен для правок в GitHub. SQLite `/var/lib/progressor/core.sqlite3`,
 `/etc/progressor/core.env`, signing.key и токены существуют только на сервере.
-Боты продолжают обновляться своими командами. Правка shared helper требует
+Все четыре продукта обновляются командой `update-all`; [инструкция](UPDATE_ALL.md).
+Прежние команды ботов сохраняют свои имена и используют тот же механизм. Правка shared helper требует
 синхронизации копий и публикации main соответствующих ботов; один update-progressor
 обновляет только Core. Ни один git pull не меняет уже запущенный Python-процесс без
 перезапуска, поэтому команда Core включает проверенный перезапуск.
@@ -44,3 +45,6 @@ updatecore и проверенная копия deploy/update_progressor.py в /
 ## Одна точка редактирования
 
 Само приложение Core отсутствует в репозиториях ботов. Для небольших локальных адаптеров канонический код находится в этом репозитории shared/. Скрипт deploy/sync_bot_helpers.py проверяет одинаковость копий в явно указанных локальных checkout (--gym/--food/--supply); --write переносит изменения. Затем запускаются тесты ботов и публикуются их main. Это адаптеры для автономной работы каждого бота, не второй сервер Core.
+
+
+Core-only entry points now delegate to deploy/update_all.py with --only core. There is one durable recovery engine and common global/Core locks. Initial installation must include both tested updater files and preserve the existing command backups.
