@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS dead_letters(id INTEGER PRIMARY KEY, source TEXT NOT 
 CREATE TABLE IF NOT EXISTS recommendations(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,rule TEXT NOT NULL,window TEXT NOT NULL,fingerprint TEXT NOT NULL,created_at TEXT NOT NULL,active INTEGER NOT NULL,payload TEXT NOT NULL, UNIQUE(user_id,rule,window,fingerprint));
 CREATE TABLE IF NOT EXISTS notification_routes(recommendation_id TEXT PRIMARY KEY,user_id TEXT NOT NULL,destination TEXT NOT NULL,state TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS hint_preferences(user_id TEXT NOT NULL,target TEXT NOT NULL,dismissed_until REAL NOT NULL,PRIMARY KEY(user_id,target));
+CREATE TABLE IF NOT EXISTS offer_preferences(user_id TEXT NOT NULL,target TEXT NOT NULL,dismissed_until REAL NOT NULL,PRIMARY KEY(user_id,target));
+CREATE TABLE IF NOT EXISTS hint_seen(user_id TEXT NOT NULL,target TEXT NOT NULL,delivery_key TEXT NOT NULL,seen_at REAL NOT NULL,PRIMARY KEY(user_id,target,delivery_key));
 '''
 
 
@@ -142,7 +144,27 @@ class Store:
             db.execute('INSERT INTO hint_preferences VALUES(?,?,?) ON CONFLICT(user_id,target) DO UPDATE SET dismissed_until=excluded.dismissed_until',(user_id,target,until))
         return until
 
+    def mark_hint_seen(self,user_id,target,delivery_key):
+        with self.connection() as db:
+            db.execute('INSERT OR IGNORE INTO hint_seen VALUES(?,?,?,?)',(user_id,target,delivery_key,time.time()))
+            db.execute('DELETE FROM hint_seen WHERE seen_at<?',(time.time()-90*86400,))
+
+    def hint_was_seen(self,user_id,target,delivery_key):
+        with self.connection() as db:
+            return bool(db.execute('SELECT 1 FROM hint_seen WHERE user_id=? AND target=? AND delivery_key=?',(user_id,target,delivery_key)).fetchone())
+
     def hints_dismissed(self, user_id, target):
         with self.connection() as db:
             row=db.execute('SELECT dismissed_until FROM hint_preferences WHERE user_id=? AND target=?',(user_id,target)).fetchone()
+        return bool(row and row[0]>time.time())
+
+    def dismiss_offers(self, user_id, target):
+        until=time.time()+7*86400
+        with self.connection() as db:
+            db.execute('INSERT INTO offer_preferences VALUES(?,?,?) ON CONFLICT(user_id,target) DO UPDATE SET dismissed_until=excluded.dismissed_until',(user_id,target,until))
+        return until
+
+    def offers_dismissed(self, user_id, target):
+        with self.connection() as db:
+            row=db.execute('SELECT dismissed_until FROM offer_preferences WHERE user_id=? AND target=?',(user_id,target)).fetchone()
         return bool(row and row[0]>time.time())

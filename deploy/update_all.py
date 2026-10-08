@@ -309,6 +309,8 @@ class Updater:
     def check_helpers(self):
         for name in ('gym', 'food', 'supply'):
             mapping = {**HELPERS, **({'workout_metrics.py': 'progressor_workout_metrics.py'} if name == 'gym' else {})}
+            if name=='food' and (self.candidates['core']/'shared'/'nutrition_plan.py').is_file():
+                mapping['nutrition_plan.py']='progressor_nutrition_plan.py'
             for src, dst in mapping.items():
                 a, b = self.candidates['core'] / 'shared' / src, self.candidates[name] / dst
                 if not a.is_file() or not b.is_file() or a.read_bytes() != b.read_bytes():

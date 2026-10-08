@@ -4,12 +4,15 @@ from .adapters import zone
 from .nutrients import CATALOG
 from .access import entitlements
 from .native_insights import enrich_workouts, native_hints
+from .offers import bundle_preview
+from .profiles import resolve_profile
 
 
 def build_context(store, user_id, now=None, requested_day=None, target=None, enabled_sources=None):
     now = now or datetime.now(timezone.utc)
     entities, memberships, state = store.data(user_id)
     access=entitlements(store,user_id,now,entities)
+    offer=bundle_preview(entities,access,target,now,enabled_sources)
     allowed={s for s in access['accessible_domains']}
     if enabled_sources is not None: allowed.intersection_update(enabled_sources)
     if target is not None and target not in allowed: allowed=set()
@@ -60,8 +63,21 @@ def build_context(store, user_id, now=None, requested_day=None, target=None, ena
     if 'food' not in active: data['nutrition']=None; data['recommendations']=[]
     if 'supply' not in active: data['supply']=None
     data['sources']={s:status for s,status in source_status.items() if s in active}
+    data['profile']=resolve_profile(fresh_entities,now)
+    current=next((e for e in totals if e['payload']['source_local_date']==day.isoformat()),None)
+    if data.get('nutrition') is not None and source_status['food']['status']=='ok':
+        data['nutrition']['today']={'date':day.isoformat(),'logged_meal_count':current['payload']['logged_meal_count'] if current else 0,
+            'totals':current['payload']['totals'] if current else None,'coverage':'logged_meals_only',
+            'remaining_to_personal_goal':{k:round(max(v-current['payload']['totals'][k],0),1) for k,v in data['nutrition']['targets'].items()} if current and data['nutrition']['targets'] else None}
     if activity and any(w['payload'].get('energy_estimate') for w in workouts):
         activity['uncertainty']='Расход энергии приблизительный. Цель питания автоматически не изменяется: обычная активность уже может быть учтена.'
+    if data.get('activity') is not None:
+        data['activity']['recorded_session_count']=len(workouts)
+        data['activity']['completed_workout_count']=sum(w['payload'].get('session_complete',True) for w in workouts)
     data['hints']=native_hints(data,fresh_entities,now,day)
+    for hint in data['hints']:
+        hint['delivery_key']=hint['key']+':'+day.isoformat()
+        hint['date']=day.isoformat()
     data['inline_hint']=next((h for h in data['hints'] if target in h['targets']),None) if target and not store.hints_dismissed(user_id,target) else None
+    data['offer_preview']=offer if target and not store.offers_dismissed(user_id,target) and not store.hints_dismissed(user_id,target) else None
     return data

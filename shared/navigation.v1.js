@@ -69,7 +69,7 @@
   }
   function activityText(activity) {
     if (!activity) return '';
-    if (activity.reason === 'workout_recorded') return `Gym: завершено тренировок — ${activity.completed_workout_count}. День Food: ${activity.date} (${activity.day_timezone}).`;
+    if (activity.reason === 'workout_recorded') return `Gym: тренировочных записей — ${activity.recorded_session_count ?? activity.completed_workout_count}, из них завершённых занятий — ${activity.completed_workout_count}. День Food: ${activity.date} (${activity.day_timezone}).`;
     if (activity.reason === 'no_completed_workout_recorded') return `Gym: за ${activity.date} завершённая тренировка пока не отмечена.`;
     if (activity.reason === 'missing_gym_membership') return 'Данных Gym пока нет. Отмечайте завершение тренировки в разделе «Тренировки».';
     return 'Данные Gym временно недоступны. Питание можно записывать как обычно.';
@@ -148,6 +148,7 @@
       .progressor-hint button:focus-visible,#progressor-shell :focus-visible{outline:3px solid #60a5fa;outline-offset:2px}
       .progressor-hint details{margin-top:8px;font-size:13px}
       .progressor-hint .progressor-sources{font-size:12px;opacity:.8}
+      .progressor-hint .progressor-example{border-left:2px solid var(--border,#46516b);padding-left:12px}
       @media(prefers-reduced-motion:reduce){.progressor-hint{scroll-behavior:auto}}
 
     `, document.head);
@@ -178,48 +179,82 @@
     const bundle = element('button', 'Progressor · подписка на 3 продукта', panel);
     bundle.type = 'button'; bundle.id = 'progressor-bundle-button';
     bundle.addEventListener('click', () => openBundle(panel));
-    window.Progressor.openBundle = () => { panel.hidden = false; return openBundle(panel); };
+    window.Progressor.openBundle = () => { panel.hidden = false; toggle.setAttribute('aria-expanded','true'); return openBundle(panel); };
     document.body.prepend(shell);
     const height = () => document.documentElement.style.setProperty('--progressor-bar-height', `${Math.ceil(shell.getBoundingClientRect().height)}px`);
     height(); new ResizeObserver(height).observe(shell);
-    let loading=false, lastContext=null, panelSignature='', inlineSignature='';
+    let loading=false, lastContext=null, panelSignature='', inlineSignature='',seenObserver=null,seenCheck=()=>{};
+    const acknowledged=new Set();
+    function observeHint(card,hint) {
+      seenObserver?.disconnect();seenObserver=null;
+      seenCheck=()=>{};
+      if(!hint.delivery_key || acknowledged.has(hint.delivery_key) || !window.IntersectionObserver) return;
+      let ratio=0,timer=null;
+      seenCheck=()=>{
+        if(ratio<.6 || document.hidden || !card.isConnected || acknowledged.has(hint.delivery_key) || timer) return;
+        const rect=card.getBoundingClientRect();
+        const x=(Math.max(rect.left,0)+Math.min(rect.right,innerWidth))/2;
+        const y=(Math.max(rect.top,0)+Math.min(rect.bottom,innerHeight))/2;
+        if(!card.contains(document.elementFromPoint(x,y))) return;
+        timer=setTimeout(()=>{
+          timer=null;
+          if(ratio<.6 || document.hidden || !card.isConnected || !card.contains(document.elementFromPoint(x,y))) return;
+          seenObserver?.disconnect();acknowledged.add(hint.delivery_key);
+          const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),2000);
+          window.fetch('/progressor/api/v1/me/hints/seen',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target:source,delivery_key:hint.delivery_key}),signal:controller.signal})
+            .then(async r=>{await r.text();if(!r.ok) acknowledged.delete(hint.delivery_key);})
+            .catch(()=>acknowledged.delete(hint.delivery_key)).finally(()=>clearTimeout(timeout));
+        },1000);
+      };
+      seenObserver=new IntersectionObserver(entries=>{
+        ratio=entries[entries.length-1]?.intersectionRatio || 0;seenCheck();
+      },{threshold:.6});seenObserver.observe(card);
+    }
+    document.addEventListener('click',()=>setTimeout(()=>seenCheck(),150));
+    document.addEventListener('visibilitychange',()=>seenCheck());
     async function performAction(action) {
       if (!action) return;
+      if (action.kind==='bundle') return window.Progressor.openBundle();
       const handled=await window.ProgressorDomain?.perform?.(action);
       if (handled) return;
-      if (action.kind==='open_food' && await bootstrap(true) && availableDomains.includes('food')) location.assign(routes.food);
+      if ((action.kind==='open_food' || action.kind==='food_log') && await bootstrap(true) && availableDomains.includes('food')) location.assign(routes.food);
     }
     function renderInline() {
       const host=window.ProgressorDomain?.hintHost?.();
       if (!host) return;
-      const hint=lastContext?.inline_hint;
+      const isOffer=!lastContext?.inline_hint && !!lastContext?.offer_preview;
+      const hint=lastContext?.inline_hint || lastContext?.offer_preview;
       const eligible=hint && window.ProgressorDomain?.eligible?.(lastContext);
       host.hidden=!eligible;
-      if (!eligible) return;
+      if (!eligible) {seenObserver?.disconnect();return;}
       const signature=JSON.stringify(hint);
-      if (inlineSignature===signature && host.firstChild) return;
+      if (inlineSignature===signature && host.firstChild) {if(!isOffer) observeHint(host.firstChild,hint);return;}
       inlineSignature=signature; host.replaceChildren();
       const card=element('aside',undefined,host); card.className='progressor-hint'; card.setAttribute('aria-label',hint.title);
+      if(isOffer){card.dataset.kind='locked-example';element('small','Возможность общей подписки',card);}
       element('strong',hint.title,card); element('p',hint.message,card);
+      if(isOffer){const example=element('p',hint.example,card);example.className='progressor-example';}
         const names=[...new Set((hint.basis||[]).map(b=>({gym:'Тренировки',food:'Еда',supply:'БАДы'}[b.source])).filter(Boolean))];
-      const sources=element('p','Учтены ваши записи: '+names.join(', '),card); sources.className='progressor-sources';
+      if(!isOffer){const sources=element('p','Учтены ваши записи: '+names.join(', '),card); sources.className='progressor-sources';}
+      else if(hint.current_access_domains?.length){const sources=element('p','Уже доступны: '+hint.current_access_domains.map(d=>({gym:'Тренировки',food:'Еда',supply:'БАДы'}[d])).join(', ')+'. Пробный и подарочный доступ тоже учитываются.',card);sources.className='progressor-sources';}
       const actions=element('div',undefined,card); actions.className='progressor-hint-actions';
-      for (const action of [hint.action,hint.secondary_action].filter(Boolean)) {
+      for (const action of [hint.action,hint.secondary_action].filter(a=>a && (!a.targets || a.targets.includes(source)))) {
         const button=element('button',action.label,actions); button.type='button';
         if(action===hint.action) button.dataset.primary='1';
-        button.addEventListener('click',async()=>{button.disabled=true;try{await performAction(action);}finally{button.disabled=false;}});
+        button.addEventListener('click',async event=>{if(action.kind==='bundle')event.stopPropagation();button.disabled=true;try{await performAction(action);}finally{button.disabled=false;}});
       }
-        const details=element('details',undefined,card); element('summary','Почему эта подсказка',details); element('p',hint.details,details); element('p','Крестик скрывает подсказки этого раздела на неделю.',details);
-        const dismiss=element('button','×',card); dismiss.type='button'; dismiss.className='progressor-dismiss'; dismiss.title='Скрыть подсказки на неделю'; dismiss.setAttribute('aria-label',dismiss.title);
+        const details=element('details',undefined,card); element('summary',isOffer?'Как это появится':'Почему эта подсказка',details); element('p',hint.details,details); element('p',isOffer?'Крестик скрывает предложения этого раздела на неделю.':'Крестик скрывает подсказки этого раздела на неделю.',details);
+        const dismiss=element('button','×',card); dismiss.type='button'; dismiss.className='progressor-dismiss'; dismiss.title=isOffer?'Скрыть предложение на неделю':'Скрыть подсказки на неделю'; dismiss.setAttribute('aria-label',dismiss.title);
       dismiss.addEventListener('click',async()=>{
         dismiss.disabled=true;
         try {
-          const response=await window.fetch('/progressor/api/v1/me/hints/dismiss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target:source})});
+          const response=await window.fetch('/progressor/api/v1/me/'+(isOffer?'offers':'hints')+'/dismiss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target:source})});
           if(!response.ok) throw new Error('unavailable');
-          lastContext.inline_hint=null; host.hidden=true; inlineSignature='';
+          if(isOffer) lastContext.offer_preview=null; else {lastContext.inline_hint=null;lastContext.offer_preview=null;} host.hidden=true; inlineSignature='';
         } catch (_) { let error=card.querySelector('[role="status"]'); if(!error){error=element('p',undefined,card);error.setAttribute('role','status');} error.textContent='Не удалось скрыть. Попробуйте ещё раз.'; }
         finally {dismiss.disabled=false;}
       });
+      if(!isOffer) observeHint(card,hint);
     }
     window.Progressor.refreshSurface=renderInline;
     document.addEventListener('click',event=>{if(!panel.hidden&&!shell.contains(event.target)){panel.hidden=true;toggle.setAttribute('aria-expanded','false');}});
@@ -235,6 +270,7 @@
         availableDomains = context.enabled_domains || [];
         status.textContent = context.memberships.length ? `Личный контекст. Подключены: ${context.memberships.map(s => ({gym:'Gym',food:'Food',supply:'Supply'}[s])).join(', ')}.` : 'В этом разделе сейчас нет доступного общего контекста.';
         lastContext=context; renderInline();
+        bundle.textContent=context.access?.bundle_active?'Общая подписка · срок и тарифы':'Progressor · подписка на 3 продукта';
         const signature=JSON.stringify({memberships:context.memberships,activity:context.activity,nutrition:context.nutrition,supply:context.supply});
         if(signature===panelSignature) return;
         panelSignature=signature;

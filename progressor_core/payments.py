@@ -1,5 +1,6 @@
 """Payment transports and independent website sign-in; no provider return URL fulfillment."""
 import hashlib
+import math
 import re
 import secrets
 import time
@@ -159,6 +160,34 @@ def install_routes(app,engine,claims):
         if set(engine(request).config.enabled_domains)!=set(SOURCES): return None
         try: return build_ai_context(engine(request).store,subject(body['user_id']),source)
         except (KeyError,ValueError,TypeError): raise HTTPException(422,'Invalid identity')
+
+    @app.post('/internal/v1/profile')
+    async def profile_context(request:Request):
+        source,body=await private(request)
+        from .context import build_context
+        try:
+            data=build_context(engine(request).store,subject(body['user_id']),target=source,enabled_sources=engine(request).config.enabled_domains)
+            return data['profile']
+        except (KeyError,ValueError,TypeError): raise HTTPException(422,'Invalid identity')
+
+    @app.post('/internal/v1/food-notifications')
+    async def food_notifications(request:Request):
+        source,body=await private(request)
+        if source!='food': raise HTTPException(403,'Food sender only')
+        from .notifications import candidate
+        try:
+            people=body['people']
+            if not isinstance(people,list) or len(people)>50: raise ValueError('batch')
+            result=[]
+            for prefs in people:
+                uid=subject(prefs['user_id'])
+                if type(prefs.get('enabled_at')) not in (int,float) or not math.isfinite(prefs['enabled_at']): raise ValueError('time')
+                for field in ('workout_enabled','nutrient_enabled'):
+                    if type(prefs.get(field)) is not bool: raise ValueError('preference')
+                value=candidate(engine(request).store,uid,prefs,enabled_sources=engine(request).config.enabled_domains)
+                if value: result.append({'user_id':uid,**value})
+            return {'items':result}
+        except (KeyError,ValueError,TypeError): raise HTTPException(422,'Invalid preferences')
 
     @app.post('/internal/v1/grants')
     async def grants(request:Request):

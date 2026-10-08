@@ -73,7 +73,7 @@ def gym(db):
         tz = user['tz'] or 'UTC'
         zone(tz)
         entities.append(entity('profile:' + str(uid), user['tg_id'], 'profile.updated', instant(user['created_at']), timezone=tz,paid_until=subscriptions.get(uid),access_basis='native_subscription'))
-    seen_sessions=set()
+    seen_sessions=set(); represented_sessions=set()
     sets_columns={r['name'] for r in db.execute('PRAGMA table_info(sets)')}
     detailed_sets={'reps','seconds','weight_kg','user_exercise_id'}.issubset(sets_columns)
     has_details=bool(db.execute("SELECT 1 FROM sqlite_master WHERE name='workout_session_details'").fetchone())
@@ -89,18 +89,57 @@ def gym(db):
         sets_count, run_count, run_seconds = 0, 0, 0
         strength_metrics=None; recorded_strength_duration=None
         if session:
+            represented_sessions.add(session['id'])
+            done_ids=None
+            if row['day_index']==0 and db.execute("SELECT 1 FROM sqlite_master WHERE name='session_exercises'").fetchone():
+                marks=list(db.execute('SELECT user_exercise_id,is_done FROM session_exercises WHERE session_id=?',(session['id'],)))
+                if marks: done_ids={m['user_exercise_id'] for m in marks if m['is_done']}
             sets_count = db.execute('SELECT count(*) FROM sets WHERE session_id=? AND COALESCE(is_warmup,0)=0', (session['id'],)).fetchone()[0]
             if detailed_sets:
-                strength_metrics=set_metrics([dict(r) for r in db.execute('SELECT * FROM sets WHERE session_id=?',(session['id'],))])
+                strength_metrics=set_metrics([dict(r) for r in db.execute('SELECT * FROM sets WHERE session_id=?',(session['id'],)) if done_ids is None or r['user_exercise_id'] in done_ids])
                 sets_count=strength_metrics['working_sets']
             if has_details:
                 details=db.execute('SELECT duration_seconds FROM workout_session_details WHERE session_id=?',(session['id'],)).fetchone()
                 if details and type(details[0]) is int and 300<=details[0]<=14400: recorded_strength_duration=details[0]
-            for run in db.execute('SELECT duration_sec,duration_ms FROM running_entries WHERE session_id=? AND COALESCE(is_draft,0)=0', (session['id'],)):
+            for run in db.execute('SELECT * FROM running_entries WHERE session_id=? AND COALESCE(is_draft,0)=0', (session['id'],)):
+                if done_ids is not None and ('user_exercise_id' not in run.keys() or run['user_exercise_id'] not in done_ids): continue
                 run_count += 1
                 run_seconds += number(run['duration_sec'] if run['duration_sec'] else number(run['duration_ms']) / 1000)
         kind = 'mixed' if sets_count and run_count else 'strength' if sets_count else 'cardio' if run_count else 'unspecified'
         entities.append(entity('workout:' + str(row['id']), user['tg_id'], 'workout.completed', completed_at, completed_at=completed_at, source_local_date=day, timezone=tz, workout_type=kind, duration_seconds=recorded_strength_duration if kind=='strength' else run_seconds if kind=='cardio' else None, recorded_strength_duration_seconds=recorded_strength_duration if kind=='strength' else None, recorded_cardio_seconds=run_seconds if run_count else None, energy_kcal_range=None, strength_sets=sets_count, strength_metrics=strength_metrics,program_id=row['system_id'],day_index=row['day_index'],session_id=session['id'] if session else None, estimate_quality='recorded_session_duration' if recorded_strength_duration and kind=='strength' else 'duration_not_recorded' if sets_count or not run_count else 'recorded_cardio_duration', timestamp_basis='source_utc'))
+    # Explicit exercise completion exists in both native views independently of day completion.
+    # A session already represented above must never also become a second workout.
+    if detailed_sets and db.execute("SELECT 1 FROM sqlite_master WHERE name='session_exercises'").fetchone():
+        for session in db.execute("SELECT DISTINCT s.* FROM sessions s JOIN session_exercises se ON se.session_id=s.id WHERE se.is_done=1 ORDER BY s.id"):
+            logical_key=(session['user_id'],session['system_id'],session['day_index'],session['date'])
+            if session['id'] in represented_sessions or logical_key in seen_sessions or session['user_id'] not in users: continue
+            user=users[session['user_id']];tz=user['tz'] or 'UTC'
+            done=[dict(r) for r in db.execute("SELECT user_exercise_id,done_at FROM session_exercises WHERE session_id=? AND is_done=1",(session['id'],))]
+            ids={r['user_exercise_id'] for r in done}
+            rows=[dict(r) for r in db.execute('SELECT * FROM sets WHERE session_id=?',(session['id'],)) if r['user_exercise_id'] in ids]
+            metrics=set_metrics(rows)
+            runs=[dict(r) for r in db.execute('SELECT * FROM running_entries WHERE session_id=? AND COALESCE(is_draft,0)=0',(session['id'],))
+                  if 'user_exercise_id' in r.keys() and r['user_exercise_id'] in ids]
+            seconds=sum(number(r['duration_sec'] if r['duration_sec'] else number(r['duration_ms'])/1000) for r in runs)
+            if not metrics['working_sets'] and not seconds: continue
+            seen_sessions.add(logical_key)
+            recorded=max((instant(r['done_at']) for r in done if r['done_at']),default=local_day_instant(session['date'],tz))
+            same_day=datetime.fromisoformat(recorded.replace('Z','+00:00')).astimezone(zone(tz)).date().isoformat()==session['date']
+            completed=recorded if same_day else local_day_instant(session['date'],tz)
+            kind='mixed' if metrics['working_sets'] and seconds else 'strength' if metrics['working_sets'] else 'cardio'
+            duration=None
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='progressor_session_durations'").fetchone():
+                row=db.execute('SELECT duration_seconds FROM progressor_session_durations WHERE session_id=?',(session['id'],)).fetchone()
+                if row and type(row[0]) is int and 300<=row[0]<=14400: duration=row[0]
+            entities.append(entity('workout:session:'+str(session['id']),user['tg_id'],'workout.updated',recorded,
+                completed_at=completed,recorded_at=recorded,source_local_date=session['date'],timezone=tz,
+                workout_type=kind,duration_seconds=duration if kind=='strength' else seconds if kind=='cardio' else None,
+                recorded_strength_duration_seconds=duration,recorded_cardio_seconds=seconds or None,
+                strength_duration_scope='explicit_strength_part' if duration else None,
+                energy_kcal_range=None,strength_sets=metrics['working_sets'],strength_metrics=metrics,
+                program_id=session['system_id'],day_index=session['day_index'],session_id=session['id'],
+                completion_basis='explicit_exercise_marks',session_complete=False,backfilled=not same_day,
+                estimate_quality='duration_not_recorded',timestamp_basis='source_utc' if same_day else 'session_local_day'))
     for row in db.execute("SELECT m.* FROM user_measurements m JOIN users u ON u.id=m.user_id WHERE m.metric='body_weight'"):
         user = users[row['user_id']]
         entities.append(entity('weight:' + str(row['id']), user['tg_id'], 'bodyweight.updated', instant(row['created_at']), value=number(row['value']), unit='kg', measured_at=instant(row['created_at'])))
@@ -113,6 +152,10 @@ def food(db):
     users = {row['telegram_id']: dict(row) for row in db.execute('SELECT * FROM users')}
     members = [{'local_id': str(uid), 'user_id': subject(uid)} for uid in users]
     entities, days = [], {}
+    trial_limit=6
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name='app_settings'").fetchone():
+        row=db.execute("SELECT value FROM app_settings WHERE key='trial_limit'").fetchone()
+        if row and type(row[0]) is int and 1<=row[0]<=1000: trial_limit=row[0]
     nutrient_rows = {}
     if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meal_nutrients'").fetchone():
         for observation in db.execute('SELECT n.* FROM meal_nutrients n JOIN meals m ON m.id=n.meal_id JOIN users u ON u.telegram_id=m.user_id WHERE n.meal_version=m.version AND n.value IS NOT NULL'):
@@ -129,7 +172,8 @@ def food(db):
             nutrient_rows.setdefault(observation['meal_id'], []).append(clean)
     for uid, user in users.items():
         paid=instant(user['premium_until']) if user.get('is_premium') and user.get('premium_until') else None
-        entities.append(entity('profile:' + str(uid), uid, 'profile.updated', instant(user['created_at'], tz), timezone=tz, timezone_basis='legacy_server_timezone',paid_until=paid,access_basis='native_subscription'))
+        trial=instant(user['trial_until']) if user.get('trial_until') and (user.get('trial_used_count') or 0)<trial_limit else None
+        entities.append(entity('profile:' + str(uid), uid, 'profile.updated', instant(user['created_at'], tz), timezone=tz, timezone_basis='legacy_server_timezone',paid_until=paid,access_basis='native_subscription',native_trial_until=trial))
     for row in db.execute('SELECT m.id,m.user_id,m.date,m.kcal,m.protein,m.fat,m.carbs,m.created_at,m.version FROM meals m JOIN users u ON u.telegram_id=m.user_id'):
         day = date.fromisoformat(row['date']).isoformat()
         macros = {key: number(row[key]) for key in ('kcal', 'protein', 'fat', 'carbs')}
@@ -155,6 +199,13 @@ def food(db):
     for row in db.execute('SELECT g.* FROM goals g JOIN users u ON u.telegram_id=g.user_id'):
         targets = {key: number(row[key]) for key in ('kcal', 'protein', 'fat', 'carbs')}
         entities.append(entity('target:' + str(row['user_id']), row['user_id'], 'nutrition_target.changed', instant(row['updated_at'], tz), targets=targets, timezone=tz, target_basis='current_personal_food_goal'))
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name='progressor_food_profile'").fetchone():
+        from shared.nutrition_plan import normalize_profile
+        for row in db.execute('SELECT * FROM progressor_food_profile WHERE sharing_enabled=1'):
+            if row['user_id'] not in users: continue
+            fields=normalize_profile(json.loads(row['profile_json']))
+            entities.append(entity('profile:nutrition:'+str(row['user_id']),row['user_id'],'profile.updated',instant(row['updated_at']),
+                profile_kind='reported_nutrition',reported_profile=fields,sharing_basis='explicit_food_profile_consent'))
     return {'memberships': members, 'entities': entities}
 
 
@@ -167,7 +218,8 @@ def supply(db):
         tz = user['tz_name'] or 'UTC'
         zone(tz)
         paid=instant(user['premium_until_utc']) if user.get('premium_until_utc') else None
-        entities.append(entity('profile:' + str(uid), user['tg_user_id'], 'profile.updated', instant(user['created_at']), timezone=tz, consent_given=bool(user['consent_given']),paid_until=paid,access_basis='native_subscription'))
+        trial=instant(user['starter_trial_until_utc']) if user.get('starter_trial_until_utc') else None
+        entities.append(entity('profile:' + str(uid), user['tg_user_id'], 'profile.updated', instant(user['created_at']), timezone=tz, consent_given=bool(user['consent_given']),paid_until=paid,access_basis='native_subscription',native_trial_until=trial))
     supplement_names = {r['id']: str(r['name_ru'] or r['name'] or '')[:160] for r in db.execute('SELECT id,name,name_ru FROM supplements')} if db.execute("SELECT 1 FROM sqlite_master WHERE name='supplements'").fetchone() else {}
     for row in db.execute('SELECT * FROM user_supplements'):
         user = users.get(row['user_id'])

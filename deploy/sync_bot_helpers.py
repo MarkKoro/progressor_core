@@ -22,7 +22,8 @@ def main():
             raise SystemExit('Expected a bot Git checkout: ' + name)
         if str(checkout).startswith('/srv/') and args.write:
             raise SystemExit('Synchronize in development; publish main and use the backed-up deployment.')
-        files = {**FILES, **({'workout_metrics.py': 'progressor_workout_metrics.py'} if name == 'gym' else {})}
+        files = {**FILES, **({'workout_metrics.py': 'progressor_workout_metrics.py'} if name == 'gym' else {}),
+                 **({'nutrition_plan.py': 'progressor_nutrition_plan.py'} if name == 'food' else {})}
         for source, target in files.items():
             canonical = (CORE / 'shared' / source).read_bytes()
             destination = checkout / target

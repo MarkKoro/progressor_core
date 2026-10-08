@@ -19,7 +19,7 @@ def entitlements(store,user_id,now=None,entities=None):
     native={source:None for source in SOURCES}
     for entity in entities:
         payload=entity['payload']
-        if entity['entity_id'].startswith('profile:') and payload.get('profile_kind')!='reported_health':
+        if entity['entity_id'].startswith('profile:') and payload.get('profile_kind') not in ('reported_health','reported_nutrition'):
             native[entity['source']]=payload.get('paid_until')
     bundle=None
     with store.connection() as db:

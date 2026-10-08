@@ -249,6 +249,30 @@ def create_app(config=None):
             raise HTTPException(403,'Subscription required')
         return {'dismissed_until':engine(request).store.dismiss_hints(identity['sub'],target)}
 
+    @app.post('/api/v1/me/offers/dismiss')
+    async def dismiss_offer(request: Request):
+        identity=claims(request)
+        raw=await request.body()
+        if len(raw)>256: raise HTTPException(413,'Body too large')
+        try: target=json.loads(raw)['target']
+        except (ValueError,KeyError,TypeError): raise HTTPException(422,'Invalid target')
+        if target not in SOURCES or target not in engine(request).config.enabled_domains:
+            raise HTTPException(422,'Invalid target')
+        return {'dismissed_until':engine(request).store.dismiss_offers(identity['sub'],target)}
+
+    @app.post('/api/v1/me/hints/seen')
+    async def hint_seen(request: Request):
+        identity=claims(request);raw=await request.body()
+        if len(raw)>512: raise HTTPException(413,'Body too large')
+        try:
+            body=json.loads(raw);target=body['target'];key=body['delivery_key']
+            if target not in SOURCES or target not in engine(request).config.enabled_domains: raise ValueError('target')
+            current=build_context(engine(request).store,identity['sub'],target=target,enabled_sources=engine(request).config.enabled_domains)
+            if not any(h.get('delivery_key')==key and target in h['targets'] for h in current['hints']): raise ValueError('hint')
+        except (KeyError,TypeError,ValueError): raise HTTPException(422,'Invalid hint')
+        engine(request).store.mark_hint_seen(identity['sub'],target,key)
+        return {'seen':True}
+
     @app.post('/api/v1/events')
     async def events(request: Request):
         cfg = engine(request).config

@@ -94,3 +94,6 @@ and emails stay immutable on all retries, including legacy bodies created before
 ## Native guidance and deterministic metrics
 
 Read this repository’s `docs/PROGRESSOR_NATIVE.md` for conditional adult MET estimates, comparable load, coverage-aware inline rules, seven-day account/target dismissal and canonical owner-local AI guards. These features never call an LLM during views or synchronization. AI context prompt v2 uses bounded workout summaries. Additional fields remain optional under envelope schema v1; old source snapshots still work.
+
+
+Native follow-up: [NATIVE_GROWTH.md](docs/NATIVE_GROWTH.md)
