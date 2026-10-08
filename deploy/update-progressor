@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/bin/python3 /srv/progressor_core/updater/update_progressor.py "$@"

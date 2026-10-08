@@ -1,0 +1,221 @@
+{
+  "schema_version": 1,
+  "nutrients": {
+    "fiber": {
+      "name": "Клетчатка",
+      "unit": "g"
+    },
+    "sugar": {
+      "name": "Сахара",
+      "unit": "g"
+    },
+    "saturated_fat": {
+      "name": "Насыщенные жиры",
+      "unit": "g"
+    },
+    "monounsaturated_fat": {
+      "name": "Мононенасыщенные жиры",
+      "unit": "g"
+    },
+    "polyunsaturated_fat": {
+      "name": "Полиненасыщенные жиры",
+      "unit": "g"
+    },
+    "trans_fat": {
+      "name": "Трансжиры",
+      "unit": "g"
+    },
+    "omega_3": {
+      "name": "Омега-3",
+      "unit": "g"
+    },
+    "omega_6": {
+      "name": "Омега-6",
+      "unit": "g"
+    },
+    "epa": {
+      "name": "EPA",
+      "unit": "mg"
+    },
+    "dha": {
+      "name": "DHA",
+      "unit": "mg"
+    },
+    "ala": {
+      "name": "ALA",
+      "unit": "g"
+    },
+    "cholesterol": {
+      "name": "Холестерин",
+      "unit": "mg"
+    },
+    "water": {
+      "name": "Вода в пище",
+      "unit": "g"
+    },
+    "alcohol": {
+      "name": "Алкоголь",
+      "unit": "g"
+    },
+    "calcium": {
+      "name": "Кальций",
+      "unit": "mg"
+    },
+    "iron": {
+      "name": "Железо",
+      "unit": "mg"
+    },
+    "magnesium": {
+      "name": "Магний",
+      "unit": "mg"
+    },
+    "phosphorus": {
+      "name": "Фосфор",
+      "unit": "mg"
+    },
+    "potassium": {
+      "name": "Калий",
+      "unit": "mg"
+    },
+    "sodium": {
+      "name": "Натрий",
+      "unit": "mg"
+    },
+    "zinc": {
+      "name": "Цинк",
+      "unit": "mg"
+    },
+    "copper": {
+      "name": "Медь",
+      "unit": "mg"
+    },
+    "manganese": {
+      "name": "Марганец",
+      "unit": "mg"
+    },
+    "selenium": {
+      "name": "Селен",
+      "unit": "ug"
+    },
+    "iodine": {
+      "name": "Йод",
+      "unit": "ug"
+    },
+    "chromium": {
+      "name": "Хром",
+      "unit": "ug"
+    },
+    "molybdenum": {
+      "name": "Молибден",
+      "unit": "ug"
+    },
+    "chloride": {
+      "name": "Хлориды",
+      "unit": "mg"
+    },
+    "vitamin_a_rae": {
+      "name": "Витамин A (RAE)",
+      "unit": "ug"
+    },
+    "retinol": {
+      "name": "Ретинол",
+      "unit": "ug"
+    },
+    "beta_carotene": {
+      "name": "Бета-каротин",
+      "unit": "ug"
+    },
+    "vitamin_b1": {
+      "name": "Витамин B1",
+      "unit": "mg"
+    },
+    "vitamin_b2": {
+      "name": "Витамин B2",
+      "unit": "mg"
+    },
+    "vitamin_b3": {
+      "name": "Ниацин",
+      "unit": "mg"
+    },
+    "vitamin_b5": {
+      "name": "Пантотеновая кислота",
+      "unit": "mg"
+    },
+    "vitamin_b6": {
+      "name": "Витамин B6",
+      "unit": "mg"
+    },
+    "biotin": {
+      "name": "Биотин",
+      "unit": "ug"
+    },
+    "folate_dfe": {
+      "name": "Фолат (DFE)",
+      "unit": "ug"
+    },
+    "folic_acid": {
+      "name": "Фолиевая кислота",
+      "unit": "ug"
+    },
+    "vitamin_b12": {
+      "name": "Витамин B12",
+      "unit": "ug"
+    },
+    "vitamin_c": {
+      "name": "Витамин C",
+      "unit": "mg"
+    },
+    "vitamin_d": {
+      "name": "Витамин D",
+      "unit": "ug"
+    },
+    "vitamin_e": {
+      "name": "Витамин E",
+      "unit": "mg"
+    },
+    "vitamin_k": {
+      "name": "Витамин K",
+      "unit": "ug"
+    },
+    "choline": {
+      "name": "Холин",
+      "unit": "mg"
+    },
+    "leucine": {
+      "name": "Лейцин",
+      "unit": "g"
+    },
+    "isoleucine": {
+      "name": "Изолейцин",
+      "unit": "g"
+    },
+    "valine": {
+      "name": "Валин",
+      "unit": "g"
+    },
+    "lysine": {
+      "name": "Лизин",
+      "unit": "g"
+    },
+    "methionine": {
+      "name": "Метионин",
+      "unit": "g"
+    },
+    "phenylalanine": {
+      "name": "Фенилаланин",
+      "unit": "g"
+    },
+    "threonine": {
+      "name": "Треонин",
+      "unit": "g"
+    },
+    "tryptophan": {
+      "name": "Триптофан",
+      "unit": "g"
+    },
+    "histidine": {
+      "name": "Гистидин",
+      "unit": "g"
+    }
+  }
+}
