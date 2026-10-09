@@ -226,7 +226,7 @@ def install_routes(app,engine,claims):
     async def private_catalog(request:Request):
         _,body=await private(request)
         if 'user_id' not in body:return engine(request).billing.catalog()
-        try:return engine(request).billing.personal_catalog(body['user_id'])
+        try:return personal_display(request,subject(body['user_id']))
         except (KeyError,ValueError,TypeError):raise HTTPException(503,'Personal pricing temporarily unavailable')
 
     @app.post('/internal/v1/bundle/cancel')
@@ -282,8 +282,24 @@ def install_routes(app,engine,claims):
     @app.get('/api/v1/me/bundle/catalog')
     def personal_catalog(request:Request):
         user=claims(request)
-        try:return engine(request).billing.personal_catalog(user['sub'])
+        try:return personal_display(request,user['sub'])
         except (KeyError,ValueError,TypeError):raise HTTPException(503,'Personal pricing temporarily unavailable')
+
+    def access_display(request,user_id):
+        from .subscriptions import subscription_view
+        return subscription_view(engine(request).store,user_id,engine(request).config.enabled_domains)
+
+    def personal_display(request,user_id):
+        cfg=engine(request).config
+        return {**engine(request).billing.personal_catalog(user_id),
+                'subscriptions':access_display(request,user_id),
+                'rub_available':bool(cfg.yookassa_shop and cfg.yookassa_key),
+                'stars_bot_urls':{s:'https://t.me/'+name for s,name in BOT_NAMES.items()},
+                'website_url':cfg.origin.rstrip('/')+'/progressor/subscribe'}
+
+    @app.get('/api/v1/me/subscriptions')
+    def subscriptions(request:Request):
+        return access_display(request,claims(request)['sub'])
 
     @app.post('/api/v1/me/bundle/cancel')
     async def cancel_personal(request:Request):
@@ -361,7 +377,7 @@ def install_routes(app,engine,claims):
     @app.post('/api/v1/website/catalog')
     def website_catalog(request:Request):
         user=web_claims(request)
-        try:return {**engine(request).billing.personal_catalog(user['sub']),'rub_available':bool(engine(request).config.yookassa_shop and engine(request).config.yookassa_key)}
+        try:return personal_display(request,user['sub'])
         except (KeyError,ValueError,TypeError):raise HTTPException(503,'Personal pricing temporarily unavailable')
 
     @app.post('/api/v1/website/cancel')

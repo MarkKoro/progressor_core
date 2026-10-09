@@ -80,58 +80,141 @@
     if (!seven.logged_days) return 'Записей питания за последние 7 завершённых дней пока нет.';
     return `Food: ${seven.logged_days} записанных дней из 7; средний белок по записанным дням — ${seven.averages_on_logged_days.protein} г. Журнал может быть неполным.`;
   }
-  async function openBundle(panel) {
-    let box = panel.querySelector('#progressor-bundle');
-    if (box) { box.remove(); return; }
-    box = element('section', undefined, panel); box.id = 'progressor-bundle';
-    const notice = element('p', 'Загрузка тарифов…', box);
-    try {
-      const response = await window.fetch('/progressor/api/v1/me/bundle/catalog', {cache:'no-store'});
-      if (!response.ok) throw new Error('unavailable');
-      const catalog = await response.json();
-      notice.textContent = 'Тренировки, питание и БАДы. Без автопродления. ' + catalog.limits;
-      const accepted = element('label', undefined, box); const checkbox = element('input', undefined, accepted); checkbox.type = 'checkbox';
-      accepted.append(document.createTextNode(' Принимаю условия общей подписки'));
-      const state = element('p', '', box);
-      if (catalog.pending_order) {
-        state.textContent = 'Есть неоплаченный счёт. Чтобы выбрать другой срок, сначала отмените его. Если деньги списаны, дождитесь подтверждения.';
-        if (!catalog.pending_order.checkout_id && !catalog.pending_order.provider_id) {
-          const cancel = element('button', 'Отменить неоплаченный счёт', box); cancel.type = 'button';
-          cancel.onclick = async () => {
-            cancel.disabled = true;
-            const response = await window.fetch('/progressor/api/v1/me/bundle/cancel', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:catalog.pending_order.id})});
-            if (response.ok) {box.remove();await openBundle(panel);}
-            else {state.textContent='Платёж уже проверяется. Если деньги списаны, повторно оплачивать не нужно.';cancel.disabled=false;}
-          };
+  const productNames = {food:'Food', gym:'Gym Diary', supply:'Supply', bundle:'Все вместе'};
+  const formatDate = value => value ? new Date(value).toLocaleDateString('ru-RU') : '';
+  const money = (value,currency) => currency==='RUB' ? (value/100).toLocaleString('ru-RU')+' ₽' : value.toLocaleString('ru-RU')+' ⭐';
+  let subscriptionData = null, subscriptionBox = null, selectedProduct = 'bundle', subscriptionLoading = false, purchaseBusy = false, subscriptionError = '';
+  function productIcon(source,parent) {
+    const paths={food:['M5 14h22a11 11 0 0 1-22 0Z','M10 10V5m6 5V3m6 7V5'],gym:['M8 16h16','M4 10v12m4-15v18m16-18v18m4-15v12'],supply:['M10 6a7 7 0 0 1 10 0l6 9a7 7 0 0 1-10 8l-6-9a7 7 0 0 1 0-8Z','M12 13l10-7'],bundle:['M16 5v10M6 23l10-8 10 8','M19 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM9 25a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm20 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z']};
+    const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 32 32');svg.setAttribute('aria-hidden','true');
+    for(const value of paths[source]){const p=document.createElementNS(svg.namespaceURI,'path');p.setAttribute('d',value);svg.append(p);}parent.append(svg);
+  }
+  function accessText(p) {
+    if(p.state==='unknown') return 'Уточняем доступ';
+    if(p.kind==='bundle') return 'Общая подписка · до '+formatDate(p.expires_at);
+    if(p.state==='active') return 'Отдельный доступ · до '+formatDate(p.expires_at);
+    if(p.state==='trial') return 'Пробный доступ · до '+formatDate(p.expires_at);
+    if(p.state==='free') return 'Бесплатный дневник';
+    return p.native_until ? 'Истекла '+formatDate(p.native_until) : 'Подписки нет';
+  }
+  function renderProducts() {
+    if(!subscriptionBox) return;
+    const grid=subscriptionBox.querySelector('[data-products]');const focusProduct=grid.contains(document.activeElement)?document.activeElement.dataset.product:null;grid.replaceChildren();
+    for(const id of ['food','gym','supply','bundle']){
+      const p=subscriptionData?.products.find(p=>p.source===id);
+      const active=id==='bundle'?subscriptionData?.bundle.active:p?.premium_active;
+      const button=element('button',undefined,grid);button.type='button';button.className='progressor-product';button.dataset.product=id;
+      button.setAttribute('aria-pressed',String(selectedProduct===id));
+      productIcon(id,button);
+      element('strong',productNames[id],button);
+      const badge=element('span',active?'✓':p?.state==='unknown'||!subscriptionData?'…':p?.state==='trial'?'◷':p?.state==='free'?'○':'＋',button);badge.className='progressor-access-badge';badge.setAttribute('aria-hidden','true');
+      const label=id==='bundle'?(!subscriptionData?'Уточняем доступ':subscriptionData.bundle.active?'Общая подписка · до '+formatDate(subscriptionData.bundle.expires_at):'Общей подписки нет'):p?accessText(p):'Уточняем доступ';
+      element('small',label,button);
+      button.onclick=()=>selectProduct(id);
+    }
+    if(focusProduct)grid.querySelector('[data-product="'+focusProduct+'"]')?.focus({preventScroll:true});
+    const summary=subscriptionBox.querySelector('[data-access-summary]');
+    if(!subscriptionData){summary.textContent=subscriptionError||'Проверяем ваши действующие подписки…';return;}
+    const active=subscriptionData.products.filter(p=>p.premium_active).map(p=>p.name);
+    const inactive=subscriptionData.products.filter(p=>['inactive','free','trial'].includes(p.state)).map(p=>p.name);
+    summary.textContent=(active.length?'Уже доступны по подписке: '+active.join(', ')+'. ':subscriptionData.unknown_products.length?'':'Активных подписок пока нет. ')+(inactive.length?'Можно подключить: '+inactive.join(', ')+'. ':'')+(subscriptionData.unknown_products.length?'Часть данных временно недоступна. Уже оплаченный доступ продолжает действовать.':'');
+  }
+  function ensureSubscriptions(panel) {
+    if(subscriptionBox?.isConnected) return subscriptionBox;
+    subscriptionBox=element('section',undefined,panel);subscriptionBox.id='progressor-subscriptions';
+    const header=element('div',undefined,subscriptionBox);header.className='progressor-subscription-heading';element('strong','Мои подписки',header);
+    const close=element('button','×',header);close.type='button';close.setAttribute('aria-label','Закрыть подписки');close.onclick=()=>{panel.hidden=true;document.querySelector('[aria-controls="progressor-context"]')?.setAttribute('aria-expanded','false');};
+    const summary=element('p','',subscriptionBox);summary.dataset.accessSummary='';summary.setAttribute('aria-live','polite');
+    const grid=element('div',undefined,subscriptionBox);grid.dataset.products='';grid.className='progressor-products';
+    const detail=element('div',undefined,subscriptionBox);detail.dataset.purchaseOptions='';detail.id='progressor-bundle';
+    panel.prepend(subscriptionBox);renderProducts();return subscriptionBox;
+  }
+  async function loadSubscriptions(panel) {
+    ensureSubscriptions(panel);if(subscriptionLoading)return;subscriptionLoading=true;
+    const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),2500);
+    try{
+      const r=await window.fetch('/progressor/api/v1/me/subscriptions',{cache:'no-store',signal:controller.signal});if(!r.ok)throw new Error();
+      subscriptionData=await r.json();subscriptionError='';renderProducts();
+    }catch(_){subscriptionData=null;subscriptionError='Не удалось обновить список подписок. Попробуйте ещё раз. Текущий продукт продолжает работать.';renderProducts();}
+    finally{clearTimeout(timeout);subscriptionLoading=false;}
+  }
+  function showPaymentState(parent,text) {let state=parent.querySelector('[data-payment-status]');if(!state){state=element('p','',parent);state.dataset.paymentStatus='';state.setAttribute('role','status');}state.textContent=text;return state;}
+  function paymentButton(parent,text,currency,plan,callback) {
+    const button=element('button',text,parent);button.type='button';button.className='progressor-pay';button.dataset.currency=currency;button.dataset.plan=plan;
+    button.addEventListener('click',async()=>{
+      if(purchaseBusy)return;purchaseBusy=true;
+      const all=[...subscriptionBox.querySelectorAll('.progressor-pay')];all.forEach(b=>b.disabled=true);
+      try{await callback(button);}catch(_){subscriptionBox.closest('#progressor-context').hidden=false;document.querySelector('[aria-controls="progressor-context"]')?.setAttribute('aria-expanded','true');showPaymentState(parent.closest('[data-purchase-options]'),'Не удалось подготовить оплату. Если деньги списаны, повторно оплачивать не нужно. Помощь: /paysupport в боте.');}
+      finally{purchaseBusy=false;all.forEach(b=>b.disabled=false);subscriptionBox.querySelector('.progressor-terms input')?.dispatchEvent(new Event('change'));}
+    });return button;
+  }
+  function planRow(parent,label) {const row=element('section',undefined,parent);row.className='progressor-plan';element('strong',label,row);const buttons=element('div',undefined,row);buttons.className='progressor-payment-pair';return {row,buttons};}
+  async function selectProduct(id) {
+    if(purchaseBusy)return;selectedProduct=id;renderProducts();
+    const box=subscriptionBox.querySelector('[data-purchase-options]');box.replaceChildren();
+    if(id==='bundle')return openBundleOptions(box);
+    element('h3',productNames[id]+' · отдельная подписка',box);
+    const own=subscriptionData?.products.find(p=>p.source===id);if(own)element('p',accessText(own),box);
+    element('p','Эта покупка открывает только '+productNames[id]+'. Для трёх продуктов выберите «Все вместе».',box);
+    if(id!==source){
+      const button=element('button','Выбрать тариф '+productNames[id],box);button.type='button';button.className='progressor-pay';
+      button.onclick=async()=>{if(await bootstrap(true)&&sessionValid()&&availableDomains.includes(id))location.assign(routes[id]+'?progressor_subscription=1');else showPaymentState(box,'Переход временно недоступен. Откройте '+productNames[id]+' из его бота.');};return;
+    }
+    const hook=window.ProgressorDomain;
+    if(!hook?.subscriptionPlans||!hook?.purchaseSubscription){showPaymentState(box,'Тарифы загружаются. Повторите выбор через несколько секунд.');return;}
+    try{
+      const plans=await hook.subscriptionPlans();if(selectedProduct!==id)return;
+      for(const p of plans){const {buttons}=planRow(box,p.label);
+        if(p.RUB)paymentButton(buttons,money(p.RUB,'RUB'),'RUB',p.id,async button=>{subscriptionBox.closest('#progressor-context').hidden=true;await hook.purchaseSubscription(p.id,'RUB',button);});
+        if(p.XTR)paymentButton(buttons,money(p.XTR,'XTR'),'XTR',p.id,async button=>{subscriptionBox.closest('#progressor-context').hidden=true;await hook.purchaseSubscription(p.id,'XTR',button);});
+      }if(!plans.length)showPaymentState(box,'Тарифы сейчас недоступны. Попробуйте позже.');
+      element('small','Рубли — платёжная страница ЮKassa. Stars — счёт Telegram. Без автоматического выбора способа оплаты.',box);
+    }catch(_){showPaymentState(box,'Не удалось загрузить тарифы. Попробуйте позже.');}
+  }
+  async function openBundleOptions(box) {
+    element('h3','Все вместе · три продукта',box);
+    const notice=element('p','Загрузка персональной стоимости…',box);
+    try{
+      const response=await window.fetch('/progressor/api/v1/me/bundle/catalog',{cache:'no-store'});if(!response.ok)throw new Error();
+      const catalog=await response.json();if(selectedProduct!=='bundle'||!box.isConnected)return;
+      if(catalog.subscriptions){subscriptionData=catalog.subscriptions;subscriptionError='';renderProducts();}
+      notice.textContent=catalog.limits;
+      const accepted=element('label',undefined,box);accepted.className='progressor-terms';const checkbox=element('input',undefined,accepted);checkbox.type='checkbox';accepted.append(document.createTextNode(' Принимаю условия общей подписки'));
+      const state=showPaymentState(box,'');
+      if(catalog.pending_order){
+        state.textContent='Есть неоплаченный счёт. Для другого срока или способа оплаты сначала отмените его. Если деньги списаны, дождитесь подтверждения.';
+        if(!catalog.pending_order.checkout_id&&!catalog.pending_order.provider_id){const cancel=element('button','Отменить неоплаченный счёт',box);cancel.type='button';cancel.className='progressor-pay';cancel.onclick=async()=>{cancel.disabled=true;try{const r=await fetch('/progressor/api/v1/me/bundle/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:catalog.pending_order.id})});if(!r.ok)throw new Error();await selectProduct('bundle');}catch(_){state.textContent='Платёж уже проверяется. Дождитесь подтверждения; повторная оплата не нужна.';cancel.disabled=false;}};}
+      }
+      for(const plan of catalog.plans){
+        const {row,buttons}=planRow(box,plan.label);
+        if(plan.prices.XTR.already_covered&&plan.prices.RUB.already_covered){element('p','Все три продукта уже доступны на этот период. Доплачивать не нужно.',row);continue;}
+        const credit=Object.entries(plan.prices).filter(([,p])=>p.credit_amount).map(([c,p])=>money(p.credit_amount,c));
+        if(credit.length)element('small','Зачёт действующих оплаченных дней: '+credit.join(' / ')+'. Ниже — итоговая доплата.',row);
+        for(const currency of ['RUB','XTR']){
+          const price=plan.prices[currency];if(price.already_covered){element('small','На этот период доплата не требуется.',buttons);continue;}
+          const button=paymentButton(buttons,money(price.amount,currency),currency,plan.id,async()=>{
+            if(!checkbox.checked)return;
+            if(currency==='RUB'){
+              const url=new URL(catalog.website_url||'/progressor/subscribe',location.origin);url.searchParams.set('source',source);url.searchParams.set('plan',plan.id);
+              if(url.origin!==location.origin||url.pathname!=='/progressor/subscribe')throw new Error('invalid_website');
+              if(window.Telegram?.WebApp?.openLink)window.Telegram.WebApp.openLink(url.href);else window.open(url.href,'_blank','noopener');
+              state.textContent='Открылся сайт оплаты. Подтвердите вход в свой аккаунт; сайт уточнит цену и откроет платёжную страницу ЮKassa.';return;
+            }
+            state.textContent='Подготовка счёта Stars…';
+            const r=await fetch('/progressor/api/v1/me/bundle/invoice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source,plan:plan.id,order_id:crypto.randomUUID(),terms:catalog.terms_version})});if(!r.ok)throw new Error();
+            const invoice=await r.json();const completed=async()=>{const result=await fetch('/progressor/api/v1/me/bundle/orders/'+encodeURIComponent(invoice.order_id),{cache:'no-store'});const v=result.ok?await result.json():{};state.textContent=v.status==='paid'?'Оплата подтверждена. Доступ обновится во всех продуктах примерно за 30 секунд.':'Оплата ещё не подтверждена. Если деньги списаны, повторно оплачивать не нужно. /paysupport';await bootstrap(true);await loadSubscriptions(subscriptionBox.closest('#progressor-context'));};
+            if(window.Telegram?.WebApp?.openInvoice)window.Telegram.WebApp.openInvoice(invoice.invoice_url,()=>completed().catch(()=>{state.textContent='Подтверждение появится после восстановления связи. /paysupport';}));
+            else{const link=element('a','Открыть счёт Stars в Telegram',box);link.className='progressor-pay';link.href=invoice.invoice_url;link.target='_blank';link.rel='noopener';state.textContent='Счёт готов.';}
+          });
+          button.disabled=!checkbox.checked||(currency==='RUB'&&!catalog.rub_available);
+          checkbox.addEventListener('change',()=>{button.disabled=purchaseBusy||!checkbox.checked||(currency==='RUB'&&!catalog.rub_available);});
         }
       }
-      for (const plan of catalog.plans) {
-        const price=plan.prices.XTR;
-        if (price.already_covered) {element('p', `${plan.label}: три продукта уже доступны по оплаченным подпискам.`,box);continue;}
-        const button = element('button', `${plan.label} · ${plan.XTR} ⭐${price.credit_amount ? ' (зачтено '+price.credit_amount+' ⭐)' : ''}`, box); button.type = 'button'; button.disabled = true;
-        checkbox.addEventListener('change', () => { button.disabled = !checkbox.checked; });
-        button.addEventListener('click', async () => {
-          if (!checkbox.checked) return; button.disabled = true;
-          const orderId = crypto.randomUUID(); state.textContent = 'Подготовка счёта…';
-          try {
-            const invoice = await window.fetch('/progressor/api/v1/me/bundle/invoice', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source,plan:plan.id,order_id:orderId,terms:catalog.terms_version})});
-            if (!invoice.ok) throw new Error('invoice_failed');
-            const data = await invoice.json();
-            const completed = async () => {
-              state.textContent = 'Проверяем подтверждение оплаты…';
-              const result = await window.fetch('/progressor/api/v1/me/bundle/orders/' + encodeURIComponent(data.order_id),{cache:'no-store'});
-              const status = result.ok ? await result.json() : {};
-              state.textContent = status.status === 'paid' ? 'Подписка подтверждена. Доступ обновится во всех разделах примерно за 30 секунд.' : 'Оплата ещё не подтверждена. Если деньги списаны, повторно оплачивать не нужно. Помощь: /paysupport в боте.';
-              await bootstrap(true);
-            };
-            if (window.Telegram?.WebApp?.openInvoice) window.Telegram.WebApp.openInvoice(data.invoice_url, () => { completed().catch(() => { state.textContent = 'Подтверждение появится после восстановления связи. /paysupport'; }); });
-            else { const link = element('a', 'Открыть счёт в Telegram', box); link.href = data.invoice_url; link.target = '_blank'; link.rel = 'noopener'; state.textContent = 'Счёт готов. Откройте его для оплаты в Stars.'; }
-          } catch (_) { state.textContent = 'Счёт сейчас недоступен. Если деньги списаны, дождитесь подтверждения; повторно оплачивать не нужно. Помощь: /paysupport.'; }
-          finally { button.disabled = !checkbox.checked; }
-        });
-      }
-    } catch (_) { notice.textContent = 'Общие тарифы временно недоступны. Текущий продукт продолжает работать.'; }
+      element('small','Рубли — на отдельной платёжной странице ЮKassa. Stars — в Telegram. Срок и стоимость подтверждаются до оплаты; автопродления нет.',box);
+    }catch(_){notice.textContent='Персональные тарифы сейчас недоступны. Ваши подписки и текущий продукт продолжают работать.';}
   }
+  async function openBundle(panel) {ensureSubscriptions(panel);await loadSubscriptions(panel);await selectProduct('bundle');}
+
   async function mount() {
     document.body.dataset.progressorDomain = source;
     const style = element('style', `
@@ -140,7 +223,7 @@
       body[data-progressor-domain="gym"] .app-header{top:var(--progressor-bar-height)}
       body[data-progressor-domain="supply"] #app{height:calc(100% - var(--progressor-bar-height));margin-top:var(--progressor-bar-height)}
       #progressor-shell{position:fixed;top:0;left:0;right:0;z-index:24;isolation:isolate;color:var(--text,inherit);font:13px system-ui;background:var(--card,#13213d);border-bottom:1px solid var(--border,#46516b);padding:calc(6px + env(safe-area-inset-top,0px)) 8px 6px;}
-      #progressor-shell nav{display:grid;grid-template-columns:1fr 1fr 1fr 48px;gap:4px;max-width:900px;margin:auto;}
+      #progressor-shell nav{display:grid;grid-template-columns:1fr 1fr 1fr 76px;gap:4px;max-width:900px;margin:auto;}
       #progressor-shell *{font-family:inherit;box-sizing:border-box}
       #progressor-shell{box-sizing:border-box;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
       #progressor-shell a,#progressor-shell button{display:flex;align-items:center;justify-content:center;min-height:48px;border:0;border-radius:10px;color:inherit;background:transparent;text-decoration:none;cursor:pointer;font:600 12px system-ui;}
@@ -163,6 +246,23 @@
       .progressor-hint details{margin-top:8px;font-size:13px}
       .progressor-hint .progressor-sources{font-size:12px;opacity:.8}
       .progressor-hint .progressor-example{border-left:2px solid var(--border,#46516b);padding-left:12px}
+
+      #progressor-subscriptions{padding-bottom:16px;border-bottom:1px solid var(--border,#46516b)}
+      #progressor-subscriptions h3{margin:16px 0 8px;font-size:16px}
+      #progressor-subscriptions small{font-size:12px;line-height:1.45;display:block}
+      .progressor-subscription-heading{display:flex;align-items:center;justify-content:space-between;font-size:17px}
+      #progressor-shell .progressor-products{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+      #progressor-shell .progressor-product{position:relative;display:flex;flex-direction:column;justify-content:flex-start;gap:8px;padding:12px 7px;border:1px solid var(--border,#46516b);background:var(--card,#13213d);min-width:0;text-align:center;white-space:normal;overflow-wrap:anywhere;font-size:13px}
+      #progressor-shell .progressor-product[aria-pressed=true]{border:2px solid #60a5fa;padding:11px 6px}
+      .progressor-product svg{width:32px;height:32px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+      .progressor-access-badge{position:absolute;right:5px;top:3px;font-size:18px}
+      .progressor-plan{padding:12px 0;border-bottom:1px solid var(--border,#46516b)}
+      .progressor-payment-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
+      #progressor-shell .progressor-pay{display:flex;justify-content:center;align-items:center;min-height:48px;padding:10px 12px;border:1px solid #60a5fa;border-radius:12px;background:#2563eb;color:#fff;font:600 14px system-ui;white-space:normal;overflow-wrap:anywhere;width:100%;text-align:center}
+      #progressor-shell .progressor-pay:disabled{opacity:.5;cursor:default}
+      .progressor-terms{display:flex;align-items:center;min-height:48px;gap:8px;font-size:13px}
+      .progressor-terms input{width:20px;height:20px;flex-shrink:0}
+      @media(max-width:480px){#progressor-shell .progressor-products{grid-template-columns:repeat(2,minmax(0,1fr))}}
       @media(prefers-reduced-motion:reduce){.progressor-hint{scroll-behavior:auto}}
 
     `, document.head);
@@ -172,7 +272,7 @@
     nav.setAttribute('aria-label', 'Разделы Progressor');
     const panel = element('section', undefined, shell);
     panel.id = 'progressor-context'; panel.hidden = true;
-    element('strong', 'Progressor · общий контекст', panel);
+    element('strong', 'Общий контекст', panel);
     const status = element('p', 'Загрузка контекста…', panel);
     const content = element('div', undefined, panel);
     for (const [domain, label] of [['gym', 'Тренировки'], ['food', 'Еда'], ['supply', 'БАДы']]) {
@@ -186,15 +286,18 @@
         else { panel.hidden = false; status.textContent = 'Переход временно недоступен. Текущий раздел продолжает работать; попробуйте позже.'; }
       });
     }
-    const toggle = element('button', '↔', nav);
-    toggle.type = 'button'; toggle.setAttribute('aria-label', 'Контекст Progressor');
+    const toggle = element('button', 'Подписки', nav);
+    toggle.type = 'button'; toggle.setAttribute('aria-label', 'Мои подписки и общий контекст');
     toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-controls', panel.id);
-    toggle.addEventListener('click', () => { panel.hidden = !panel.hidden; toggle.setAttribute('aria-expanded', String(!panel.hidden)); if (!panel.hidden) loadContext(); });
+    toggle.addEventListener('click', () => { panel.hidden = !panel.hidden; toggle.setAttribute('aria-expanded', String(!panel.hidden)); if (!panel.hidden) {loadContext();openBundle(panel);} });
     const bundle = element('button', 'Progressor · подписка на 3 продукта', panel);
     bundle.type = 'button'; bundle.id = 'progressor-bundle-button';
     bundle.addEventListener('click', () => openBundle(panel));
     window.Progressor.openBundle = () => { panel.hidden = false; toggle.setAttribute('aria-expanded','true'); return openBundle(panel); };
+    window.Progressor.openSubscriptions = window.Progressor.openBundle;
+    window.Progressor.openProductSubscriptions = async id => {panel.hidden=false;toggle.setAttribute('aria-expanded','true');ensureSubscriptions(panel);await loadSubscriptions(panel);await selectProduct(id);};
     document.body.prepend(shell);
+    if(new URLSearchParams(location.search).get('progressor_subscription')==='1'){panel.hidden=false;toggle.setAttribute('aria-expanded','true');ensureSubscriptions(panel);loadSubscriptions(panel).then(()=>selectProduct(source));}
     const height = () => document.documentElement.style.setProperty('--progressor-bar-height', `${Math.ceil(shell.getBoundingClientRect().height)}px`);
     height(); new ResizeObserver(height).observe(shell);
     let loading=false, lastContext=null, panelSignature='', inlineSignature='',seenObserver=null,seenCheck=()=>{};
@@ -310,7 +413,8 @@
       finally { clearTimeout(timeout); loading = false; nav.querySelectorAll('a').forEach(a => a.setAttribute('aria-disabled', String(a.dataset.domain !== source && (!sessionValid() || !availableDomains.includes(a.dataset.domain))))); }
     }
     await loadContext();
-    setInterval(() => { if (document.visibilityState === 'visible') loadContext(); }, 30000);
+    await loadSubscriptions(panel);
+    setInterval(() => { if (document.visibilityState === 'visible') {loadContext();loadSubscriptions(panel);} }, 30000);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) loadContext(); });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, {once:true}); else mount();
