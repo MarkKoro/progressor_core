@@ -2,9 +2,11 @@
 import base64
 import importlib.util
 import json
+import os
 import sqlite3
 import subprocess
 import tempfile
+import tarfile
 import unittest
 from contextlib import ExitStack
 from pathlib import Path
@@ -71,6 +73,75 @@ class CoordinatedUpdate(unittest.TestCase):
             self.assertTrue(up.protected_path(path), path)
         self.assertFalse(up.protected_path('.env.example'))
         self.assertFalse(up.protected_path('webapp/config.js'))
+
+    def test_disappearing_sidecars_reproduce_old_tar_race_and_are_skipped_before_stat(self):
+        tree=self.root/'live-tree'; tree.mkdir()
+        (tree/'code.py').write_text('valid=True\n')
+        (tree/'.env').write_text('DUMMY=1\n')
+        real_listdir=os.listdir
+        def disappear(path):
+            names=real_listdir(path)
+            if Path(path)==tree:
+                for name in ('source.sqlite3-wal','source.sqlite3-shm'):
+                    (tree/name).unlink(missing_ok=True)
+            return names
+        def exclusions(item):
+            return None if item.name.endswith(('-wal','-shm')) else item
+        for fixed in (False,True):
+            for name in ('source.sqlite3-wal','source.sqlite3-shm'):(tree/name).write_bytes(b'temporary')
+            target=self.root/('fixed.tar' if fixed else 'old.tar')
+            with tarfile.open(target,'w') as tar, patch.object(os,'listdir',side_effect=disappear):
+                if fixed:
+                    up.add_filtered_backup_tree(tar,tree,arcname='app',filter=exclusions)
+                else:
+                    with self.assertRaises(FileNotFoundError):tar.add(tree,arcname='app',filter=exclusions)
+        with tarfile.open(self.root/'fixed.tar') as tar:
+            self.assertEqual(set(tar.getnames()),{'app','app/code.py','app/.env'})
+            self.assertEqual(tar.extractfile('app/code.py').read(),b'valid=True\n')
+
+    def test_excluded_runtime_directory_disappears_without_stat_or_following_symlinks(self):
+        tree=self.root/'runtime-tree';tree.mkdir()
+        runtime=tree/'.venv';runtime.mkdir()
+        (tree/'code.py').write_text('saved=True\n')
+        (tree/'external-link').symlink_to(self.root/'outside')
+        real_listdir=os.listdir
+        def disappear(path):
+            names=real_listdir(path)
+            if Path(path)==tree:runtime.rmdir()
+            return names
+        with tarfile.open(self.root/'runtime.tar','w') as tar, patch.object(os,'listdir',side_effect=disappear):
+            up.add_filtered_backup_tree(tar,tree,arcname='app',filter=lambda item:None if '.venv' in Path(item.name).parts else item)
+        with tarfile.open(self.root/'runtime.tar') as tar:
+            self.assertEqual(set(tar.getnames()),{'app','app/code.py','app/external-link'})
+            self.assertTrue(tar.getmember('app/external-link').issym())
+
+    def test_disappearing_unexcluded_code_aborts_backup(self):
+        tree=self.root/'code-tree';tree.mkdir()
+        code=tree/'required.py';code.write_text('required=True\n')
+        real_listdir=os.listdir
+        def disappear(path):
+            names=real_listdir(path)
+            if Path(path)==tree:code.unlink()
+            return names
+        with tarfile.open(self.root/'incomplete.tar','w') as tar, patch.object(os,'listdir',side_effect=disappear):
+            with self.assertRaises(FileNotFoundError):
+                up.add_filtered_backup_tree(tar,tree,arcname='app',filter=lambda item:item)
+
+    def test_size_estimate_tolerates_sidecar_race_but_not_missing_code(self):
+        tree=self.root/'size-tree';tree.mkdir()
+        sidecar=tree/'source.sqlite3-wal';sidecar.write_bytes(b'volatile')
+        code=tree/'required.py';code.write_bytes(b'code')
+        real_stat=Path.stat
+        def sidecar_stat(path,*args,**kwargs):
+            if path==sidecar and kwargs.get('follow_symlinks',True):sidecar.unlink(missing_ok=True)
+            return real_stat(path,*args,**kwargs)
+        with patch.object(Path,'stat',side_effect=sidecar_stat,autospec=True):
+            self.assertEqual(up.tree_size(tree),len(b'code'))
+        def code_stat(path,*args,**kwargs):
+            if path==code and kwargs.get('follow_symlinks',True):code.unlink(missing_ok=True)
+            return real_stat(path,*args,**kwargs)
+        with patch.object(Path,'stat',side_effect=code_stat,autospec=True):
+            with self.assertRaises(FileNotFoundError):up.tree_size(tree)
 
     def test_real_git_rollback_restores_added_deleted_files_and_keeps_tracked_live_data(self):
         before, _ = self.repository('food')

@@ -241,8 +241,22 @@ def tree_size(folder, exclude=()):
         dirs[:] = [d for d in dirs if d not in exclude]
         for name in files:
             path = Path(root) / name
-            if not path.is_symlink(): total += path.stat().st_size
+            if not path.is_symlink():
+                try: total += path.stat().st_size
+                except FileNotFoundError:
+                    # Live SQLite sidecars may vanish during a checkpoint. Missing code must still fail.
+                    if not name.endswith(('-wal', '-shm')): raise
     return total
+
+
+def add_filtered_backup_tree(tar, path, *, arcname, filter):
+    """Apply our filename exclusions before TarFile.gettarinfo can stat a vanished sidecar."""
+    path = Path(path)
+    if filter(tarfile.TarInfo(arcname)) is None: return
+    tar.add(path, arcname=arcname, recursive=False, filter=filter)
+    if path.is_dir() and not path.is_symlink():
+        for child in sorted(path.iterdir()):
+            add_filtered_backup_tree(tar, child, arcname=arcname.rstrip('/') + '/' + child.name, filter=filter)
 
 
 def ensure_space(needed=0):
@@ -481,8 +495,8 @@ class Updater:
             return item
         archive = folder / 'code-config.tar.gz'
         with tarfile.open(archive, 'w:gz') as tar:
-            for spec in REPOS.values(): tar.add(spec['path'], arcname=str(spec['path']).lstrip('/'), filter=code_filter)
-            tar.add(self.state['core_before'], arcname='previous-core-release', filter=lambda item: None if any(
+            for spec in REPOS.values(): add_filtered_backup_tree(tar, spec['path'], arcname=str(spec['path']).lstrip('/'), filter=code_filter)
+            add_filtered_backup_tree(tar, self.state['core_before'], arcname='previous-core-release', filter=lambda item: None if any(
                 p in {'.venv', '__pycache__'} for p in PurePosixPath(item.name).parts) else item)
             for path in [Path('/etc/progressor'), Path('/etc/nginx'), Path('/etc/gymdiary_webapp_prod.env'),
                          UPDATERS, *self.command_paths(),
