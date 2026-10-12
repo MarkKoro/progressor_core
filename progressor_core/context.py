@@ -6,14 +6,18 @@ from .access import entitlements
 from .native_insights import enrich_workouts, native_hints
 from .offers import bundle_preview
 from .profiles import resolve_profile
+from .connections import preferences
 
 
 def build_context(store, user_id, now=None, requested_day=None, target=None, enabled_sources=None):
     now = now or datetime.now(timezone.utc)
     entities, memberships, state = store.data(user_id)
     access=entitlements(store,user_id,now,entities)
+    policy=preferences(store,user_id)
     offer=bundle_preview(entities,access,target,now,enabled_sources)
     allowed={s for s in access['accessible_domains']}
+    allowed={s for s in allowed if policy['sources'][s]}
+    if policy['rest_active']:allowed=set()
     if enabled_sources is not None: allowed.intersection_update(enabled_sources)
     if target is not None and target not in allowed: allowed=set()
     entities=[e for e in entities if e['source'] in allowed]
@@ -65,19 +69,39 @@ def build_context(store, user_id, now=None, requested_day=None, target=None, ena
     data['sources']={s:status for s,status in source_status.items() if s in active}
     data['profile']=resolve_profile(fresh_entities,now)
     current=next((e for e in totals if e['payload']['source_local_date']==day.isoformat()),None)
+    if data.get('nutrition') and data['nutrition'].get('targets'):
+        from .training_rhythm import active
+        rhythm=active(store,user_id,now)
+        if rhythm and day<datetime.fromtimestamp(rhythm['confirmed_at'],food_zone).date():rhythm=None
+        data['nutrition']['rhythm']=rhythm
+        if rhythm:
+            data['nutrition']['base_targets']=data['nutrition']['targets']
+            data['nutrition']['targets']=rhythm['days'][day.weekday()]
+            data['nutrition']['target_basis']='user_confirmed_weekly_redistribution'
     if data.get('nutrition') is not None and source_status['food']['status']=='ok':
         data['nutrition']['today']={'date':day.isoformat(),'logged_meal_count':current['payload']['logged_meal_count'] if current else 0,
             'totals':current['payload']['totals'] if current else None,'coverage':'logged_meals_only',
+            'day_complete':bool(current and current['payload'].get('day_complete')),
             'remaining_to_personal_goal':{k:round(max(v-current['payload']['totals'][k],0),1) for k,v in data['nutrition']['targets'].items()} if current and data['nutrition']['targets'] else None}
     if activity and any(w['payload'].get('energy_estimate') for w in workouts):
         activity['uncertainty']='Расход энергии приблизительный. Цель питания автоматически не изменяется: обычная активность уже может быть учтена.'
     if data.get('activity') is not None:
         data['activity']['recorded_session_count']=len(workouts)
         data['activity']['completed_workout_count']=sum(w['payload'].get('session_complete',True) for w in workouts)
-    data['hints']=native_hints(data,fresh_entities,now,day)
+    data['hints']=native_hints(data,fresh_entities,now,day) if policy['hints'] else []
+    from .connection_changes import recent,hints
+    data['recent_changes']=recent(store,user_id,now)
+    data['hints']+=hints(store,user_id,target,now) if target else []
+    data['hints'].sort(key=lambda h:(h['priority'],h['key']))
     for hint in data['hints']:
-        hint['delivery_key']=hint['key']+':'+day.isoformat()
+        hint.setdefault('delivery_key',hint['key']+':'+day.isoformat())
         hint['date']=day.isoformat()
     data['inline_hint']=next((h for h in data['hints'] if target in h['targets']),None) if target and not store.hints_dismissed(user_id,target) else None
+    if policy['frequency']=='quiet' and data['inline_hint']:
+        with store.connection() as db:last=db.execute('SELECT delivery_key FROM hint_seen WHERE user_id=? AND seen_at>? ORDER BY seen_at DESC LIMIT 1',(user_id,now.timestamp()-7*86400)).fetchone()
+        # Reading retains the same hint; it only limits new suggestions.
+        if last and last[0]!=data['inline_hint']['delivery_key']:data['inline_hint']=None
     data['offer_preview']=offer if target and not store.offers_dismissed(user_id,target) and not store.hints_dismissed(user_id,target) else None
+    if policy['rest_active']:data['offer_preview']=None
+    data['connections']={'rest_active':policy['rest_active'],'hints':policy['hints'],'sources':policy['sources'],'frequency':policy['frequency']}
     return data

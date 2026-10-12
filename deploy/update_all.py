@@ -53,9 +53,9 @@ DBS = {'gym': Path('/srv/gym_diary_prod/gymdiary.db'),
        'supply': Path('/srv/supply_bot/data/supply_bot.sqlite3'),
        'core': Path('/var/lib/progressor/core.sqlite3')}
 INCOMPLETE = {'stopping', 'switching', 'starting', 'verifying', 'promoting', 'rolling_back'}
-HELPERS = {'domain_bridge.py': 'progressor_bridge.py', 'progressor_client.py': 'progressor_client.py',
+HELPERS = {'timezone_history.py':'progressor_timezone_history.py','ai_cache.py':'progressor_ai_cache.py','domain_bridge.py': 'progressor_bridge.py', 'progressor_client.py': 'progressor_client.py',
            'progressor_bot.py': 'progressor_bot.py', 'ai_guard.py': 'progressor_ai_guard.py',
-           'native_subscription.py':'progressor_native_subscription.py'}
+           'native_subscription.py':'progressor_native_subscription.py','product_links.py':'progressor_links.py','day_goal.py':'progressor_day_goal.py','food_sources.py':'progressor_food_sources.py'}
 
 
 class UpdateError(RuntimeError):
@@ -401,7 +401,7 @@ class Updater:
                 try: compile(file.read_bytes(), str(file), 'exec')
                 except Exception: raise UpdateError('candidate_syntax_error:' + name + '/' + str(file.relative_to(source)))
             selections = [('gymdiary.service', 'test_subscriptions.py'), ('gymdiary_webapp_prod.service', 'test_progressor_context.py'),
-                          ('gymdiary_webapp_prod.service', 'test_native_controls.py'),('gymdiary.service','test_bot_native.py')] if name == 'gym' else [
+                          ('gymdiary_webapp_prod.service', 'test_native_controls.py'),('gymdiary.service','test_bot_native.py'),('gymdiary.service','test_free_workout.py'),('gymdiary_webapp_prod.service','test_selected_gym.py')] if name == 'gym' else [
                           ('progressor_core.service' if name == 'core' else name + '_bot.service', None)]
             emit('Проверяю новую версию: ' + REPOS[name]['title'] + '…')
             for i, (unit, pattern) in enumerate(selections):

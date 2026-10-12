@@ -61,6 +61,7 @@ class Engine:
         if len(config.signing_key) < 32 or any(Path(config.db_path).resolve() == Path(p).resolve() for p in config.source_paths.values()):
             raise ValueError('unsafe_core_configuration')
         self.store = Store(config.db_path)
+        self.store.enabled_sources=set(config.enabled_domains)
         self.billing = Billing(self.store,NativePricing(config.source_paths),config.bundle_upgrade_gate)
         self.subscription_notices=SubscriptionNotices(self.store,config.source_paths)
         self.metrics = Counter()
@@ -301,6 +302,11 @@ def create_app(config=None):
             raise HTTPException(409 if str(exc).endswith('conflict') else 422, 'Event rejected')
 
     install_routes(app,engine,claims)
+    from .connection_routes import install as install_connections
+    install_connections(app,engine,claims)
+    @app.get('/assets/connections.v1.js')
+    def connection_settings_asset():
+        return FileResponse(Path(__file__).resolve().parents[1] / 'shared' / 'connections.v1.js',media_type='application/javascript')
     return app
 
 

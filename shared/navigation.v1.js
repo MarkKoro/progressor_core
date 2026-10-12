@@ -83,7 +83,7 @@
   const productNames = {food:'Food', gym:'Gym Diary', supply:'Supply', bundle:'Все вместе'};
   const formatDate = value => value ? new Date(value).toLocaleDateString('ru-RU') : '';
   const money = (value,currency) => currency==='RUB' ? (value/100).toLocaleString('ru-RU')+' ₽' : value.toLocaleString('ru-RU')+' ⭐';
-  let subscriptionData = null, subscriptionBox = null, selectedProduct = 'bundle', subscriptionLoading = false, purchaseBusy = false, subscriptionError = '';
+  let subscriptionData = null, subscriptionBox = null, selectedProduct = 'bundle', subscriptionLoading = false, purchaseBusy = false, subscriptionError = '', purchaseOptionsRevision=0;
   function productIcon(source,parent) {
     const paths={food:['M5 14h22a11 11 0 0 1-22 0Z','M10 10V5m6 5V3m6 7V5'],gym:['M8 16h16','M4 10v12m4-15v18m16-18v18m4-15v12'],supply:['M10 6a7 7 0 0 1 10 0l6 9a7 7 0 0 1-10 8l-6-9a7 7 0 0 1 0-8Z','M12 13l10-7'],bundle:['M16 5v10M6 23l10-8 10 8','M19 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM9 25a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm20 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z']};
     const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 32 32');svg.setAttribute('aria-hidden','true');
@@ -150,9 +150,9 @@
   }
   function planRow(parent,label) {const row=element('section',undefined,parent);row.className='progressor-plan';element('strong',label,row);const buttons=element('div',undefined,row);buttons.className='progressor-payment-pair';return {row,buttons};}
   async function selectProduct(id) {
-    if(purchaseBusy)return;selectedProduct=id;renderProducts();
+    if(purchaseBusy)return;const revision=++purchaseOptionsRevision;selectedProduct=id;renderProducts();
     const box=subscriptionBox.querySelector('[data-purchase-options]');box.replaceChildren();
-    if(id==='bundle')return openBundleOptions(box);
+    if(id==='bundle')return openBundleOptions(box,revision);
     element('h3',productNames[id]+' · отдельная подписка',box);
     const own=subscriptionData?.products.find(p=>p.source===id);if(own)element('p',accessText(own),box);
     element('p','Эта покупка открывает только '+productNames[id]+'. Для трёх продуктов выберите «Все вместе».',box);
@@ -163,20 +163,20 @@
     const hook=window.ProgressorDomain;
     if(!hook?.subscriptionPlans||!hook?.purchaseSubscription){showPaymentState(box,'Тарифы загружаются. Повторите выбор через несколько секунд.');return;}
     try{
-      const plans=await hook.subscriptionPlans();if(selectedProduct!==id)return;
+      const plans=await hook.subscriptionPlans();if(revision!==purchaseOptionsRevision||!box.isConnected)return;
       for(const p of plans){const {buttons}=planRow(box,p.label);
         if(p.RUB)paymentButton(buttons,money(p.RUB,'RUB'),'RUB',p.id,async button=>{subscriptionBox.closest('#progressor-context').hidden=true;await hook.purchaseSubscription(p.id,'RUB',button);});
         if(p.XTR)paymentButton(buttons,money(p.XTR,'XTR'),'XTR',p.id,async button=>{subscriptionBox.closest('#progressor-context').hidden=true;await hook.purchaseSubscription(p.id,'XTR',button);});
       }if(!plans.length)showPaymentState(box,'Тарифы сейчас недоступны. Попробуйте позже.');
       element('small','Рубли — платёжная страница ЮKassa. Stars — счёт Telegram. Без автоматического выбора способа оплаты.',box);
-    }catch(_){showPaymentState(box,'Не удалось загрузить тарифы. Попробуйте позже.');}
+    }catch(_){if(revision===purchaseOptionsRevision)showPaymentState(box,'Не удалось загрузить тарифы. Попробуйте позже.');}
   }
-  async function openBundleOptions(box) {
+  async function openBundleOptions(box,revision) {
     element('h3','Все вместе · три продукта',box);
     const notice=element('p','Загрузка персональной стоимости…',box);
     try{
       const response=await window.fetch('/progressor/api/v1/me/bundle/catalog',{cache:'no-store'});if(!response.ok)throw new Error();
-      const catalog=await response.json();if(selectedProduct!=='bundle'||!box.isConnected)return;
+      const catalog=await response.json();if(revision!==purchaseOptionsRevision||selectedProduct!=='bundle'||!box.isConnected)return;
       if(catalog.subscriptions){subscriptionData=catalog.subscriptions;subscriptionError='';renderProducts();}
       notice.textContent=catalog.limits;
       const accepted=element('label',undefined,box);accepted.className='progressor-terms';const checkbox=element('input',undefined,accepted);checkbox.type='checkbox';accepted.append(document.createTextNode(' Принимаю условия общей подписки'));
@@ -202,7 +202,7 @@
             }
             state.textContent='Подготовка счёта Stars…';
             const r=await fetch('/progressor/api/v1/me/bundle/invoice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source,plan:plan.id,order_id:crypto.randomUUID(),terms:catalog.terms_version})});if(!r.ok)throw new Error();
-            const invoice=await r.json();const completed=async()=>{const result=await fetch('/progressor/api/v1/me/bundle/orders/'+encodeURIComponent(invoice.order_id),{cache:'no-store'});const v=result.ok?await result.json():{};state.textContent=v.status==='paid'?'Оплата подтверждена. Доступ обновится во всех продуктах примерно за 30 секунд.':'Оплата ещё не подтверждена. Если деньги списаны, повторно оплачивать не нужно. /paysupport';await bootstrap(true);await loadSubscriptions(subscriptionBox.closest('#progressor-context'));};
+            const invoice=await r.json();const completed=async()=>{const result=await fetch('/progressor/api/v1/me/bundle/orders/'+encodeURIComponent(invoice.order_id),{cache:'no-store'});const v=result.ok?await result.json():{};state.textContent=v.status==='paid'?'Оплата подтверждена. Доступ обновится во всех продуктах примерно за 30 секунд.':'Оплата ещё не подтверждена. Если деньги списаны, повторно оплачивать не нужно. /paysupport';const panel=subscriptionBox.closest('#progressor-context');await bootstrap(true);await loadSubscriptions(panel);if(v.status==='paid'&&panel&&!panel.querySelector('[data-paid-link-step]')){const step=element('button','Настроить связь продуктов',panel);step.type='button';step.dataset.paidLinkStep='';step.onclick=()=>window.Progressor.openConnections();}};
             if(window.Telegram?.WebApp?.openInvoice)window.Telegram.WebApp.openInvoice(invoice.invoice_url,()=>completed().catch(()=>{state.textContent='Подтверждение появится после восстановления связи. /paysupport';}));
             else{const link=element('a','Открыть счёт Stars в Telegram',box);link.className='progressor-pay';link.href=invoice.invoice_url;link.target='_blank';link.rel='noopener';state.textContent='Счёт готов.';}
           });
@@ -211,25 +211,26 @@
         }
       }
       element('small','Рубли — на отдельной платёжной странице ЮKassa. Stars — в Telegram. Срок и стоимость подтверждаются до оплаты; автопродления нет.',box);
-    }catch(_){notice.textContent='Персональные тарифы сейчас недоступны. Ваши подписки и текущий продукт продолжают работать.';}
+    }catch(_){if(revision===purchaseOptionsRevision)notice.textContent='Персональные тарифы сейчас недоступны. Ваши подписки и текущий продукт продолжают работать.';}
   }
-  async function openBundle(panel) {ensureSubscriptions(panel);await loadSubscriptions(panel);await selectProduct('bundle');}
+  async function openBundle(panel) {ensureSubscriptions(panel);const revision=++purchaseOptionsRevision;await loadSubscriptions(panel);if(revision===purchaseOptionsRevision)await selectProduct('bundle');}
 
   async function mount() {
     document.body.dataset.progressorDomain = source;
     const style = element('style', `
-      :root{--progressor-bar-height:56px}
+      :root{--progressor-bar-height:48px}
       body[data-progressor-domain="gym"],body[data-progressor-domain="food"]{padding-top:var(--progressor-bar-height)}
       body[data-progressor-domain="gym"] .app-header{top:var(--progressor-bar-height)}
       body[data-progressor-domain="supply"] #app{height:calc(100% - var(--progressor-bar-height));margin-top:var(--progressor-bar-height)}
-      #progressor-shell{position:fixed;top:0;left:0;right:0;z-index:24;isolation:isolate;color:var(--text,inherit);font:13px system-ui;background:var(--card,#13213d);border-bottom:1px solid var(--border,#46516b);padding:calc(6px + env(safe-area-inset-top,0px)) 8px 6px;}
+      #progressor-shell{position:fixed;top:0;left:0;right:0;z-index:24;isolation:isolate;color:#f1f5f9;font:13px system-ui;background:#13213d;border-bottom:1px solid var(--border,#46516b);padding:calc(2px + env(safe-area-inset-top,0px)) 8px 2px;}
       #progressor-shell nav{display:grid;grid-template-columns:1fr 1fr 1fr 76px;gap:4px;max-width:900px;margin:auto;}
       #progressor-shell *{font-family:inherit;box-sizing:border-box}
       #progressor-shell{box-sizing:border-box;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
       #progressor-shell a,#progressor-shell button{display:flex;align-items:center;justify-content:center;min-height:48px;border:0;border-radius:10px;color:inherit;background:transparent;text-decoration:none;cursor:pointer;font:600 12px system-ui;}
       #progressor-shell a[aria-current="page"]{background:#2563eb;color:white}
+      #progressor-shell nav a,#progressor-shell nav button{min-height:44px;border-radius:8px}
       #progressor-shell a[aria-disabled="true"]{opacity:.55}
-      #progressor-context{position:absolute;top:100%;left:8px;right:8px;max-width:880px;margin:auto;background:var(--card,#13213d);border:1px solid var(--border,#46516b);border-radius:0 0 14px 14px;padding:14px;box-shadow:0 10px 24px #0004;max-height:65vh;overflow:auto;overscroll-behavior:contain;line-height:1.5}
+      #progressor-context{position:absolute;top:100%;left:8px;right:8px;max-width:880px;margin:auto;background:#13213d;border:1px solid var(--border,#46516b);border-radius:0 0 14px 14px;padding:14px;box-shadow:0 10px 24px #0004;max-height:65vh;overflow:auto;overscroll-behavior:contain;line-height:1.5}
       #progressor-context[hidden]{display:none}
       #progressor-context p{margin:8px 0} #progressor-context a{display:inline-flex;background:#2563eb;color:white;padding:0 12px}
       #progressor-inline-host{margin:12px 0;scroll-margin-top:calc(var(--progressor-bar-height) + 16px)}
@@ -271,6 +272,9 @@
     const nav = element('nav', undefined, shell);
     nav.setAttribute('aria-label', 'Разделы Progressor');
     const panel = element('section', undefined, shell);
+    const connectionButton=element('button','Связь продуктов',panel);connectionButton.type='button';
+    connectionButton.addEventListener('click',()=>document.dispatchEvent(new Event('progressor:open-connections')));
+    const settingsScript=document.createElement('script');settingsScript.src='/progressor/assets/connections.v1.js';settingsScript.dataset.progressorSource=source;document.head.append(settingsScript);
     panel.id = 'progressor-context'; panel.hidden = true;
     element('strong', 'Общий контекст', panel);
     const status = element('p', 'Загрузка контекста…', panel);
@@ -295,12 +299,12 @@
     bundle.addEventListener('click', () => openBundle(panel));
     window.Progressor.openBundle = () => { panel.hidden = false; toggle.setAttribute('aria-expanded','true'); return openBundle(panel); };
     window.Progressor.openSubscriptions = window.Progressor.openBundle;
-    window.Progressor.openProductSubscriptions = async id => {panel.hidden=false;toggle.setAttribute('aria-expanded','true');ensureSubscriptions(panel);await loadSubscriptions(panel);await selectProduct(id);};
+    window.Progressor.openProductSubscriptions = async id => {panel.hidden=false;toggle.setAttribute('aria-expanded','true');ensureSubscriptions(panel);const revision=++purchaseOptionsRevision;await loadSubscriptions(panel);if(revision===purchaseOptionsRevision)await selectProduct(id);};
     document.body.prepend(shell);
     if(new URLSearchParams(location.search).get('progressor_subscription')==='1'){panel.hidden=false;toggle.setAttribute('aria-expanded','true');ensureSubscriptions(panel);loadSubscriptions(panel).then(()=>selectProduct(source));}
     const height = () => document.documentElement.style.setProperty('--progressor-bar-height', `${Math.ceil(shell.getBoundingClientRect().height)}px`);
     height(); new ResizeObserver(height).observe(shell);
-    let loading=false, lastContext=null, panelSignature='', inlineSignature='',seenObserver=null,seenCheck=()=>{};
+    let loading=false, lastContext=null, panelSignature='', inlineSignature='',seenObserver=null,seenCheck=()=>{},initialContextRetries=0;
     const acknowledged=new Set();
     function observeHint(card,hint) {
       seenObserver?.disconnect();seenObserver=null;
@@ -374,8 +378,8 @@
       if(!isOffer) observeHint(card,hint);
     }
     window.Progressor.refreshSurface=renderInline;
-    document.addEventListener('click',event=>{if(!panel.hidden&&!shell.contains(event.target)){panel.hidden=true;toggle.setAttribute('aria-expanded','false');}});
-    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!panel.hidden){panel.hidden=true;toggle.setAttribute('aria-expanded','false');toggle.focus();}});
+    document.addEventListener('click',event=>{const path=event.composedPath();const inside=path.includes(shell)||path.some(n=>n?.id==='progressor-connections');if(!panel.hidden&&!inside){panel.hidden=true;toggle.setAttribute('aria-expanded','false');}});
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!panel.hidden&&!document.querySelector('#progressor-connections[open]')){panel.hidden=true;toggle.setAttribute('aria-expanded','false');toggle.focus();}});
     async function loadContext() {
       if (loading) return; loading = true;
       const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 2500);
@@ -409,7 +413,7 @@
         }
         content.querySelectorAll('details').forEach((d,i)=>{d.open=!!expanded[i];});
         if (context.memberships.length) element('small', 'Источники: ' + context.memberships.map(s => ({gym:'Gym',food:'Food',supply:'Supply'}[s])).join(', ') + '. Изменения обычно появляются в течение минуты; выводы учитывают полноту записей.', content);
-      } catch (_) { status.textContent = 'Общий контекст временно недоступен. Текущий раздел продолжает работать.'; lastContext=null; renderInline(); }
+      } catch (_) { status.textContent = 'Общий контекст временно недоступен. Текущий раздел продолжает работать.'; lastContext=null; renderInline();if(initialContextRetries++<2)setTimeout(loadContext,2500); }
       finally { clearTimeout(timeout); loading = false; nav.querySelectorAll('a').forEach(a => a.setAttribute('aria-disabled', String(a.dataset.domain !== source && (!sessionValid() || !availableDomains.includes(a.dataset.domain))))); }
     }
     await loadContext();

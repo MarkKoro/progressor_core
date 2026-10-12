@@ -24,7 +24,10 @@ def build_ai_context(store, user_id, target, now=None):
     entities = store.data(user_id)[0]
     fresh = {s for s, state in context['sources'].items() if state['status'] == 'ok' and s != target}
     enrich_workouts([e for e in entities if context['sources'].get(e['source'],{}).get('status')=='ok'],now)
-    result = {'schema_version':1, 'prompt_version':PROMPT_VERSION, 'generated_at':now.isoformat(), 'sources':[], 'instructions':PROMPT, 'data':{}}
+    from .connections import preferences
+    result = {'schema_version':1, 'prompt_version':PROMPT_VERSION,
+              'permission_revision':preferences(store,user_id)['revision'],
+              'generated_at':now.isoformat(), 'sources':[], 'instructions':PROMPT, 'data':{}}
     for source in sorted(fresh):
         values = [e for e in entities if e['source'] == source]
         if source == 'supply' and context['supply']:

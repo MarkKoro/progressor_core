@@ -393,7 +393,8 @@ def install_routes(app,engine,claims):
             order=engine(request).billing.order(body['order_id'],user['sub'])
             if order['currency']=='RUB' and order['provider_id'] and order['status']=='pending':
                 await reconcile_rub(engine(request),order['provider_id']); order=engine(request).billing.order(order['id'],user['sub'])
-            return {'id':order['id'],'status':order['status']}
+            return {'id':order['id'],'status':order['status'],
+                    'next_step':{'label':'Настроить связь продуктов','url':'https://t.me/'+BOT_NAMES[order['source']]+'?start=pgsettings'} if order['status']=='paid' else None}
         except ValueError: raise HTTPException(404,'Order not found')
 
     @app.post('/api/v1/bundle/yookassa/webhook')

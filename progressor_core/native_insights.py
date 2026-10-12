@@ -46,11 +46,13 @@ def native_hints(data, entities, now, day):
         working_sets=sum((w.get('strength_metrics') or {}).get('working_sets',w.get('strength_sets',0)) for w in today)
         reps=sum((w.get('strength_metrics') or {}).get('repetitions',0) for w in today)
         increased=any(w.get('load_comparison',{}).get('status')=='higher_recorded_load' for w in today)
-        title='Сегодня больше нагрузки' if increased else 'Тренировка учтена'
+        decreased=not increased and any(w.get('load_comparison',{}).get('status')=='lower_recorded_load' for w in today)
+        title='Сегодня больше нагрузки' if increased else 'Сегодня меньше записанной нагрузки' if decreased else 'Тренировка учтена'
         partial=any(w.get('session_complete') is False for w in today)
         message=f"Сегодня учтено тренировочных записей — {len(today)}." if partial else f"Сегодня завершено занятий — {len(today)}."
         if working_sets: message+=f" Рабочих подходов — {working_sets}"+(f", повторений — {reps}." if reps else '.')
         if increased: message+=' Объём тех же упражнений выше обычного.'
+        elif decreased:message+=' Объём тех же упражнений ниже обычного. Это не измерение расхода энергии.'
         remaining=(nutrition or {}).get('today',{}).get('remaining_to_personal_goal')
         if source('food') and remaining:
             message+=f" До вашей цели в журнале: {remaining['kcal']:g} ккал, Б {remaining['protein']:g} г, Ж {remaining['fat']:g} г, У {remaining['carbs']:g} г."

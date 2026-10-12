@@ -31,6 +31,8 @@ class Store:
         with self.connection() as db:
             db.execute('PRAGMA journal_mode=WAL')
             db.executescript(SCHEMA)
+            from .connections import SCHEMA as CONNECTION_SCHEMA
+            db.executescript(CONNECTION_SCHEMA)
             if db.execute('SELECT max(version) FROM schema_version').fetchone()[0] != 1:
                 raise RuntimeError('unsupported_core_schema')
 
@@ -68,7 +70,14 @@ class Store:
         if old and old['revision'] >= payload['revision']:
             return 'out_of_order'
         deleted = event['event_type'].endswith('.deleted') or payload.get('deleted') is True
+        from .connection_changes import record
+        record(db,event,old)
         db.execute('INSERT INTO entities VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(source,entity_id) DO UPDATE SET revision=excluded.revision,hash=excluded.hash,event_id=excluded.event_id,type=excluded.type,deleted=excluded.deleted,payload=excluded.payload', (event['source'], payload['entity_id'], event['user_id'], payload['revision'], event_hash, event['event_id'], event['event_type'], int(deleted), canonical(payload)))
+        if event['source']=='gym' and ((payload.get('profile_kind')=='coach_link' and (payload.get('status')!='accepted' or payload.get('coach_enabled') is not True))
+                or (deleted and old and __import__('json').loads(old['payload']).get('profile_kind')=='coach_link')):
+            prior=payload if not deleted else __import__('json').loads(old['payload'])
+            db.execute('UPDATE coach_nutrition_permissions SET macros=0,top_dishes=0,expires_at=0 WHERE trainee_id=? AND coach_id=? AND link_id=?',
+                (event['user_id'],prior['coach_id'],prior['link_id']))
         return 'accepted'
 
     def reconcile(self, source, snapshot):
@@ -110,6 +119,9 @@ class Store:
                 changed += 1
             stamp = time.time()
             db.execute("INSERT INTO source_state VALUES(?,'ok',?,?,0,0,NULL) ON CONFLICT(source) DO UPDATE SET status='ok',observed_at=excluded.observed_at,last_success=excluded.last_success,failures=0,retry_at=0,reason=NULL", (source, stamp, stamp))
+            if source=='gym':
+                from .connection_changes import revoke_coach_permissions
+                revoke_coach_permissions(db)
         return changed
 
     def failed(self, source, reason):

@@ -73,6 +73,15 @@ def gym(db):
         tz = user['tz'] or 'UTC'
         zone(tz)
         entities.append(entity('profile:' + str(uid), user['tg_id'], 'profile.updated', instant(user['created_at']), timezone=tz,paid_until=subscriptions.get(uid),access_basis='native_subscription'))
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name='trainer_links'").fetchone():
+        columns={r['name'] for r in db.execute('PRAGMA table_info(users)')}
+        if 'is_trainer' in columns:
+            for link in db.execute('SELECT l.*,u.is_trainer FROM trainer_links l JOIN users u ON u.id=l.trainer_user_id'):
+                trainee=users.get(link['trainee_user_id']);coach=users.get(link['trainer_user_id'])
+                if not trainee or not coach:continue
+                entities.append(entity('profile:coach:'+str(link['id']),trainee['tg_id'],'profile.updated',instant(link['created_at']),
+                    profile_kind='coach_link',link_id=str(link['id']),coach_id=subject(coach['tg_id']),
+                    coach_enabled=bool(link['is_trainer']),status=link['status'],label='Тренер Gym Diary'))
     seen_sessions=set(); represented_sessions=set()
     sets_columns={r['name'] for r in db.execute('PRAGMA table_info(sets)')}
     detailed_sets={'reps','seconds','weight_kg','user_exercise_id'}.issubset(sets_columns)
@@ -80,7 +89,8 @@ def gym(db):
     for row in db.execute('SELECT h.* FROM day_completion_history h JOIN users u ON u.id=h.user_id ORDER BY h.id'):
         user = users[row['user_id']]
         completed_at = instant(row['completed_at'])
-        tz = user['tz'] or 'UTC'
+        from shared.timezone_history import at as historical_zone
+        tz = historical_zone(db,user['tg_id'],completed_at,user['tz'] or 'UTC')
         day = datetime.fromisoformat(completed_at.replace('Z', '+00:00')).astimezone(zone(tz)).date().isoformat()
         session_key=(row['user_id'],row['system_id'],row['day_index'],day)
         if session_key in seen_sessions: continue
@@ -131,6 +141,14 @@ def gym(db):
             if db.execute("SELECT 1 FROM sqlite_master WHERE name='progressor_session_durations'").fetchone():
                 row=db.execute('SELECT duration_seconds FROM progressor_session_durations WHERE session_id=?',(session['id'],)).fetchone()
                 if row and type(row[0]) is int and 300<=row[0]<=14400: duration=row[0]
+            free=None
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='progressor_free_sessions'").fetchone():
+                free=db.execute('SELECT * FROM progressor_free_sessions WHERE session_id=?',(session['id'],)).fetchone()
+            finished=bool(free and free['status']=='finished')
+            if finished and free['completed_at']:
+                recorded=instant(free['completed_at']);completed=recorded
+                same_day=datetime.fromisoformat(recorded.replace('Z','+00:00')).astimezone(zone(tz)).date().isoformat()==session['date']
+                if not same_day:completed=local_day_instant(session['date'],tz)
             entities.append(entity('workout:session:'+str(session['id']),user['tg_id'],'workout.updated',recorded,
                 completed_at=completed,recorded_at=recorded,source_local_date=session['date'],timezone=tz,
                 workout_type=kind,duration_seconds=duration if kind=='strength' else seconds if kind=='cardio' else None,
@@ -138,7 +156,7 @@ def gym(db):
                 strength_duration_scope='explicit_strength_part' if duration else None,
                 energy_kcal_range=None,strength_sets=metrics['working_sets'],strength_metrics=metrics,
                 program_id=session['system_id'],day_index=session['day_index'],session_id=session['id'],
-                completion_basis='explicit_exercise_marks',session_complete=False,backfilled=not same_day,
+                completion_basis=free['completion_basis'] if finished else 'explicit_exercise_marks',session_complete=finished,backfilled=not same_day,
                 estimate_quality='duration_not_recorded',timestamp_basis='source_utc' if same_day else 'session_local_day'))
     for row in db.execute("SELECT m.* FROM user_measurements m JOIN users u ON u.id=m.user_id WHERE m.metric='body_weight'"):
         user = users[row['user_id']]
@@ -174,12 +192,21 @@ def food(db):
         paid=instant(user['premium_until']) if user.get('is_premium') and user.get('premium_until') else None
         trial=instant(user['trial_until']) if user.get('trial_until') and (user.get('trial_used_count') or 0)<trial_limit else None
         entities.append(entity('profile:' + str(uid), uid, 'profile.updated', instant(user['created_at'], tz), timezone=tz, timezone_basis='legacy_server_timezone',paid_until=paid,access_basis='native_subscription',native_trial_until=trial))
-    for row in db.execute('SELECT m.id,m.user_id,m.date,m.kcal,m.protein,m.fat,m.carbs,m.created_at,m.version FROM meals m JOIN users u ON u.telegram_id=m.user_id'):
+    meal_columns={r['name'] for r in db.execute('PRAGMA table_info(meals)')}
+    raw_column=',m.raw_json' if 'raw_json' in meal_columns else ''
+    for row in db.execute('SELECT m.id,m.user_id,m.date,m.kcal,m.protein,m.fat,m.carbs,m.created_at,m.version'+raw_column+' FROM meals m JOIN users u ON u.telegram_id=m.user_id'):
         day = date.fromisoformat(row['date']).isoformat()
         macros = {key: number(row[key]) for key in ('kcal', 'protein', 'fat', 'carbs')}
         occurred_at = instant(row['created_at'], tz) if row['created_at'] else local_day_instant(day, tz)
         observations = sorted(nutrient_rows.get(row['id'], []), key=lambda n: n['nutrient_code'])
-        entities.append(entity('meal:' + str(row['id']), row['user_id'], 'meal.logged', occurred_at, source_local_date=day, timezone=tz, timestamp_basis='legacy_server_timezone', source_revision=row['version'], macros=macros, nutrients=observations, estimate_quality='food_logged_estimate'))
+        display_title=''
+        if raw_column:
+            try:
+                raw=json.loads(row['raw_json'] or '{}');raw=raw.get('analysis',raw)
+                display_title=', '.join(i['name'].strip() for i in raw.get('items',[]) if isinstance(i,dict) and isinstance(i.get('name'),str))[:120]
+                if not display_title and isinstance(raw.get('template_name'),str):display_title=raw['template_name'][:120]
+            except (TypeError,ValueError,AttributeError):pass
+        entities.append(entity('meal:' + str(row['id']), row['user_id'], 'meal.logged', occurred_at, source_local_date=day, timezone=tz, timestamp_basis='legacy_server_timezone', source_revision=row['version'], macros=macros, nutrients=observations, estimate_quality='food_logged_estimate',display_title=display_title))
         total = days.setdefault((row['user_id'], day), {'totals': {k: 0.0 for k in macros}, 'logged_meal_count': 0, 'nutrients': {}})
         total['logged_meal_count'] += 1
         for key, value in macros.items():
@@ -195,6 +222,12 @@ def food(db):
             group['assessed_components'] += observation['coverage']['total_components']
             group['qualities'] = sorted(set(group['qualities']) | {observation['source'] + ':' + observation['confidence']})
     for (uid, day), total in days.items():
+        complete=False
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='progressor_day_closure'").fetchone():
+            closure=db.execute('SELECT meal_versions FROM progressor_day_closure WHERE user_id=? AND day=?',(uid,day)).fetchone()
+            versions=[[r[0],r[1]] for r in db.execute('SELECT id,version FROM meals WHERE user_id=? AND date=? ORDER BY id',(uid,day))]
+            complete=bool(closure and json.loads(closure[0])==versions and versions)
+        total['day_complete']=complete
         entities.append(entity('daily:' + str(uid) + ':' + day, uid, 'daily_nutrition.updated', local_day_instant(day, tz), source_local_date=day, timezone=tz, timestamp_basis='legacy_local_day', coverage='logged_meals_only', **total))
     for row in db.execute('SELECT g.* FROM goals g JOIN users u ON u.telegram_id=g.user_id'):
         targets = {key: number(row[key]) for key in ('kcal', 'protein', 'fat', 'carbs')}
@@ -241,6 +274,7 @@ def supply(db):
             user=users.get(row['user_id'])
             if not user or not user['consent_given']: continue
             fields={k:row[k] for k in ('sex_at_birth','birth_year','height_cm','weight_kg','diet_type','training_sessions_per_week','training_minutes_per_week')}
+            if 'country_code' in row.keys() and row['country_code']:fields['country_code']=str(row['country_code'])[:2]
             entities.append(entity('profile:health:'+str(row['user_id']),user['tg_user_id'],'profile.updated',instant(row['updated_at_utc'] or row['created_at_utc']),profile_kind='reported_health',reported_profile=fields))
     for row in db.execute('SELECT id,user_id,report_date,parse_status,updated_at_utc,created_at_utc FROM lab_reports'):
         user = users.get(row['user_id'])

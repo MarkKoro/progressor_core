@@ -60,7 +60,7 @@ def compare_load(current, previous):
         if len(per_ex)==len(current_ex): ratios.append(median(per_ex))
     if len(ratios)<3: return {'status':'insufficient_comparable_history','comparable_sessions':len(ratios)}
     ratio=median(ratios)
-    return {'status':'higher_recorded_load' if ratio>=1.2 else 'usual_recorded_load',
+    return {'status':'higher_recorded_load' if ratio>=1.2 else 'lower_recorded_load' if ratio<=.8 else 'usual_recorded_load',
             'comparison_ratio':round(ratio,3),'comparable_sessions':len(ratios),
             'method':'median_exercise_ratios_against_last_8_same_day_program_sessions.v1',
             'threshold_basis':'20_percent_display_rule_not_physiological_threshold',

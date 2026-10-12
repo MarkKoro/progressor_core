@@ -63,3 +63,17 @@ class UpgradeAPI(unittest.TestCase):
             db.execute('UPDATE progressor_native_tariffs SET updated_at=?',(time.time(),))
             db.execute("UPDATE users SET premium_until='2000-01-01T00:00:00Z'")
         inputs=NativePricing(self.paths)(str(USER));self.assertEqual(inputs['food']['paid_intervals'],[])
+
+    def test_website_postpayment_next_step_only_confirmed_owned_order(self):
+        order=self.private('food','/internal/v1/bundle/quote',{'user_id':str(USER),'order_id':str(uuid.uuid4()),'plan':'m1','terms':'progressor.bundle.v2'}).json()
+        token=sign_assertion({'id':USER},int(time.time()),'core',KEY,ttl=900)
+        with self.engine.store.connection() as conn:conn.execute('INSERT INTO website_sessions VALUES(?,?,?)',(hashlib.sha256(token.encode()).hexdigest(),str(USER),time.time()+600))
+        url='/api/v1/website/status';headers={'X-Progressor-Web':token}
+        pending=self.client.post(url,json={'order_id':order['id']},headers=headers)
+        self.assertEqual(pending.status_code,200);self.assertIsNone(pending.json()['next_step'])
+        with self.engine.store.connection() as conn:conn.execute("UPDATE bundle_orders SET status='paid' WHERE id=?",(order['id'],))
+        paid=self.client.post(url,json={'order_id':order['id']},headers=headers)
+        self.assertEqual(paid.json()['next_step']['url'],'https://t.me/EjkaClejka_bot?start=pgsettings')
+        other=sign_assertion({'id':OTHER},int(time.time()),'core',KEY,ttl=900)
+        with self.engine.store.connection() as conn:conn.execute('INSERT INTO website_sessions VALUES(?,?,?)',(hashlib.sha256(other.encode()).hexdigest(),str(OTHER),time.time()+600))
+        self.assertEqual(self.client.post(url,json={'order_id':order['id']},headers={'X-Progressor-Web':other}).status_code,404)

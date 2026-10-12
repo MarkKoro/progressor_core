@@ -4,9 +4,9 @@ import hashlib
 from pathlib import Path
 
 CORE = Path(__file__).resolve().parents[1]
-FILES = {'domain_bridge.py': 'progressor_bridge.py', 'progressor_client.py': 'progressor_client.py',
+FILES = {'timezone_history.py':'progressor_timezone_history.py','ai_cache.py':'progressor_ai_cache.py','domain_bridge.py': 'progressor_bridge.py', 'progressor_client.py': 'progressor_client.py',
          'progressor_bot.py': 'progressor_bot.py', 'ai_guard.py': 'progressor_ai_guard.py',
-         'native_subscription.py':'progressor_native_subscription.py'}
+         'native_subscription.py':'progressor_native_subscription.py','product_links.py':'progressor_links.py','day_goal.py':'progressor_day_goal.py','food_sources.py':'progressor_food_sources.py'}
 
 
 def main():
