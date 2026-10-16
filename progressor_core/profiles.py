@@ -10,9 +10,12 @@ def resolve_profile(entities, now, at=None):
     at = at or now
     candidates = []
     for e in entities:
+        p = e['payload']; source = e['source']
+        if not ((source=='food' and p.get('profile_kind')=='reported_nutrition')
+                or (source=='supply' and p.get('profile_kind')=='reported_health')
+                or (source=='gym' and e['entity_id'].startswith('weight:'))): continue
         stamp = parsed(e['occurred_at'])
         if not at-timedelta(days=90) <= stamp <= at: continue
-        p = e['payload']; source = e['source']
         if source == 'food' and p.get('profile_kind') == 'reported_nutrition':
             candidates.append((0, stamp, e, normalize_profile(p.get('reported_profile',{}))))
         elif source == 'supply' and p.get('profile_kind') == 'reported_health':

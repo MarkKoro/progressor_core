@@ -6,8 +6,8 @@ from .connections import permitted_entities,preferences
 from .contracts import canonical,digest,subject
 from shared.day_goal import redistribute,goal_key
 
-def proposal(store,user_id,now=None):
-    now=now or datetime.now(timezone.utc);entities,_,_=permitted_entities(store,user_id,now)
+def proposal(store,user_id,now=None,*,snapshot=None):
+    now=now or datetime.now(timezone.utc);entities,_,_=permitted_entities(store,user_id,now,snapshot=snapshot)
     records=sorted([e for e in entities if e['source']=='gym' and e['entity_id'].startswith('workout:')
         and e['payload'].get('session_complete',True) and e['payload'].get('program_id') is not None
         and not e['payload'].get('backfilled')],key=lambda e:e['payload']['completed_at'])
@@ -50,10 +50,10 @@ def confirm(store,user_id,fingerprint,base_key,extra,now=None):
             (uid,canonical(body),now.timestamp(),(now+timedelta(days=28)).timestamp()))
     return active(store,uid,now)
 
-def active(store,user_id,now=None):
+def active(store,user_id,now=None,*,snapshot=None):
     now=now or datetime.now(timezone.utc);policy=preferences(store,user_id,now.timestamp())
     if policy['rest_active'] or not all(policy['sources'][s] for s in ('food','gym')):return None
-    entities,_,_=permitted_entities(store,user_id,now)
+    entities,_,_=permitted_entities(store,user_id,now,snapshot=snapshot)
     if not all(any(e['source']==s for e in entities) for s in ('food','gym')):return None
     with store.connection() as db:row=db.execute('SELECT * FROM confirmed_training_rhythm WHERE user_id=? AND expires_at>?',(subject(user_id),now.timestamp())).fetchone()
     if not row:return None

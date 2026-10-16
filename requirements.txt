@@ -1,4 +1,7 @@
+# Exact tested dependency versions: see docs/QUALITY_PROGRAM.md.
+-c constraints.txt
 fastapi==0.139.0
 uvicorn==0.49.0
 httpx==0.28.1
-tzdata>=2025.2; sys_platform == "win32"
+tzdata==2025.2; sys_platform == "win32"
+pip==26.2.1

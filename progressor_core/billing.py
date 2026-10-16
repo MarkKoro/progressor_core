@@ -232,7 +232,9 @@ class Billing:
                     old=db.execute('SELECT body,revision FROM bundle_source_grants WHERE user_id=? AND source=?',(user_id,source)).fetchone()
                     legacy_revision=db.execute('SELECT revision FROM bundle_entitlements WHERE user_id=?',(user_id,)).fetchone()['revision']
                     has_v2=db.execute('SELECT 1 FROM bundle_orders WHERE user_id=? AND pricing_json IS NOT NULL LIMIT 1',(user_id,)).fetchone()
-                    revision=(old['revision']+(old['body']!=body) if old else legacy_revision+1) if has_v2 else legacy_revision
+                    # Legacy users also change projection when time crosses an interval.
+                    # Never reuse or lower a published revision after expiry/refund/renewal.
+                    revision=max(legacy_revision,old['revision']+(old['body']!=body)) if old else legacy_revision+int(bool(has_v2))
                     db.execute('INSERT INTO bundle_source_grants VALUES(?,?,?,?) ON CONFLICT(user_id,source) DO UPDATE SET body=excluded.body,revision=excluded.revision',(user_id,source,body,revision))
                     items.append({'user_id':user_id,'source':source,'expires_at':expiry,'intervals':intervals,'revision':revision})
             return {'items':items,'next':users[499] if len(users)>500 else None}

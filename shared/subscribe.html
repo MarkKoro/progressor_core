@@ -22,9 +22,11 @@ async function showPlans(){
       $('plans').append(b);
     }
   }
-  for(const p of c.plans){
+  const primary=c.plans.filter(p=>['m1','m6','y1','align'].includes(p.id)),extra=c.plans.filter(p=>!['m1','m6','y1','align'].includes(p.id));let more;
+  for(const p of [...primary,...extra]){
+    let parent=$('plans');if(extra.includes(p)){if(!more){more=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Другие сроки';summary.style.cssText='min-height:44px;display:flex;align-items:center;cursor:pointer';more.append(summary);parent.append(more);}parent=more;}
     const price=p.prices.RUB;
-    if(price.already_covered){const note=document.createElement('p');note.textContent=p.label+': все три продукта уже доступны по оплаченным подпискам.';$('plans').append(note);continue;}
+    if(price.already_covered){const note=document.createElement('p');note.textContent=p.label+': все три продукта уже доступны по оплаченным подпискам.';parent.append(note);continue;}
     const b=document.createElement('button');b.type='button';b.dataset.plan=p.id;
     b.textContent=p.label+' · '+(p.RUB/100).toLocaleString('ru-RU')+' ₽'+(price.credit_amount?' (зачтено '+(price.credit_amount/100).toLocaleString('ru-RU')+' ₽)':'');
     b.disabled=!$('terms').checked;
@@ -39,7 +41,7 @@ async function showPlans(){
     const row=document.createElement('section');row.className='plan';const title=document.createElement('strong');title.textContent=p.label;row.append(title);const pair=document.createElement('div');pair.className='payment-pair';b.textContent=(p.RUB/100).toLocaleString('ru-RU')+' ₽';pair.append(b);
     const stars=document.createElement('a');stars.textContent=p.XTR.toLocaleString('ru-RU')+' ⭐';stars.href=c.stars_bot_urls[source]+'?start=pgplan_'+encodeURIComponent(p.id);stars.target='_blank';stars.rel='noopener';pair.append(stars);row.append(pair);
     if(p.prices.RUB.credit_amount){const note=document.createElement('small');note.textContent='Зачтено оплаченных дней: '+(p.prices.RUB.credit_amount/100).toLocaleString('ru-RU')+' ₽. Кнопка показывает итоговую доплату.';row.append(note);}
-    if(p.id===params.get('plan'))row.classList.add('selected');$('plans').append(row);
+    if(p.id===params.get('plan')){row.classList.add('selected');if(more&&parent===more)more.open=true;}parent.append(row);
   }
   $('terms').onchange=()=>{for(const b of $('plans').querySelectorAll('button[data-plan]'))b.disabled=!$('terms').checked;};
 }

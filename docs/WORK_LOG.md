@@ -72,3 +72,13 @@ These closing changes update documentation only. Runtime files retain the tested
 The documentation closure attempt stopped before switching any service:FileNotFoundError while archiving Gym after its docs. Its four SQLite copies were valid; attempted_repositories was empty and switch_started was false. A deterministic regression reproduced TarFile.add listing a WAL/SHM and then trying gettarinfo after the SQLite checkpoint removed it; the tar filter ran after that metadata read. Filename exclusions now run before metadata, with nonrecursive archival and explicit descent. The related size-estimation stat race is handled for WAL/SHM only. Missing ordinary code/configuration still aborts; excluded runtimes are skipped before stat and symlinks are not traversed.
 
 All219 Core tests passed, including4 new real temporary-file regression cases; original205 domain tests cover unchanged runtime. Updater SHA256 `f8f08d4556d58ba9ac4b15bce3d7779cf2668250f89408ca5d9f60368b49198f`; test SHA256 `69b7e7b46ef334a0fb69c65ec1c0a65ba3122d7566114b416131260de41de865`. This is an operational code fix in addition to the earlier documentation-only commit; native feature code, helpers,permissions,financial protocol and live databases are unchanged. Final coordinated424-test deployment and bounded server/off-server post-checkpoint results are recorded in the private operational journal.
+
+
+## Quality program — 2026-10-16
+
+Technical and UI review rules, repaired failure patterns and next-agent constraints are documented in [QUALITY_PROGRAM.md](QUALITY_PROGRAM.md). The quality release is checked on synthetic SQLite databases, isolated providers, clean declared dependencies and actual HTML/API browser emulation. Operational deployment revisions, consistent backup/restore receipts and source-specific verification results are retained in the private action journal. This entry does not assert a physical Telegram/device test or a completed production switch.
+
+
+### Проверенный состав выпуска качества
+
+Финальная серверная прогонка: 640/640, без ошибок и пропусков; этот компонент — 246 тестов. Финальная прогонка HTML/API — 153 сценария в 13 группах. Копия до обновления скачана с сервера и восстановлена вне сервера для всех четырёх баз. Фактическое переключение и последующая проверка фиксируются отдельно; эта запись не утверждает завершение рабочего развёртывания. [Состав и ограничения выпуска](https://github.com/MarkKoro/progressor_core/blob/main/docs/QUALITY_RELEASE.md).

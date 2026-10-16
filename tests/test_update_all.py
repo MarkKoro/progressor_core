@@ -74,6 +74,26 @@ class CoordinatedUpdate(unittest.TestCase):
         self.assertFalse(up.protected_path('.env.example'))
         self.assertFalse(up.protected_path('webapp/config.js'))
 
+    def test_new_runtime_installs_only_declared_roots_and_retains_old_inventory(self):
+        source=self.root/'candidate-food';source.mkdir()
+        (source/'requirements.txt').write_text('-c constraints.txt\nhttpx==0.28.1\npip==26.2.1\n')
+        (source/'constraints.txt').write_text('httpx==0.28.1\n')
+        old_python=self.root/'old-env/bin/python';old_python.parent.mkdir(parents=True);old_python.write_text('old environment untouched')
+        self.u.candidates={'food':source}
+        self.u.runtime_plans={'food-test':dict(name='food',python=str(old_python),needs=True)}
+        self.u.state['units']={'food_bot.service':dict(args=[str(old_python)])}
+        calls,control=self.mock_processes()
+        with control,patch.object(up,'text_command',return_value='unmanaged-old-package==1.0'),patch.object(up,'ensure_space'),patch.object(up,'tree_size',return_value=1),patch.object(self.u,'check_helpers'):
+            self.u.prepare_runtimes()
+        installs=[args for args in calls if 'install' in args]
+        self.assertEqual(len(installs),2)
+        self.assertEqual(installs[0][-1],'pip==26.2.1')
+        self.assertIn('--only-binary=:all:',installs[0])
+        self.assertEqual(installs[1][-1],source/'requirements.txt')
+        self.assertNotIn('unmanaged-old-package',str(installs))
+        self.assertEqual((self.u.folder/'food-test-baseline.txt').read_text(),'unmanaged-old-package==1.0\n')
+        self.assertEqual(old_python.read_text(),'old environment untouched')
+
     def test_disappearing_sidecars_reproduce_old_tar_race_and_are_skipped_before_stat(self):
         tree=self.root/'live-tree'; tree.mkdir()
         (tree/'code.py').write_text('valid=True\n')
@@ -170,7 +190,7 @@ class CoordinatedUpdate(unittest.TestCase):
         self.u.state['attempted_repositories'] = list(revisions)
         self.u.state['affected'] = ['food_bot.service', 'progressor_core.service']
         self.u.state['switch_started'] = True
-        for unit, old in [('food_bot.service', b'old runtime')]:
+        for unit, old in [('food_bot.service', b'[Service]\nEnvironment="LD_LIBRARY_PATH=/old/sqlite/lib"\n')]:
             p = up.SYSTEMD / (unit + '.d') / up.DROPIN; up.atomic_file(p, b'new runtime')
             self.u.state['dropins'][unit] = base64.b64encode(old).decode()
         up.atomic_file(up.UPDATERS / 'update_all.py', b'new updater')
@@ -189,7 +209,7 @@ class CoordinatedUpdate(unittest.TestCase):
             self.assertEqual((self.repos[n]['path'] / 'live.sqlite3').read_bytes(), b'new paid/user writes')
         self.assertEqual((self.core / 'current').resolve(), self.old)
         self.assertEqual((up.UPDATERS / 'update_all.py').read_bytes(), b'old updater')
-        self.assertEqual((up.SYSTEMD / 'food_bot.service.d' / up.DROPIN).read_bytes(), b'old runtime')
+        self.assertEqual((up.SYSTEMD / 'food_bot.service.d' / up.DROPIN).read_bytes(), b'[Service]\nEnvironment="LD_LIBRARY_PATH=/old/sqlite/lib"\n')
         self.assertEqual(self.u.state['phase'], 'rolled_back')
 
     def test_interrupted_transaction_is_recovered_before_a_new_plan(self):
@@ -247,6 +267,8 @@ class CoordinatedUpdate(unittest.TestCase):
         self.assertIn('ExecStart=\n', text); self.assertIn('"/new/python" "-m" "uvicorn"', text)
         self.assertIn('"8005"', text)
         self.assertIn('$$', up.runtime_dropin(['/x/python', '$bad%'], '/new/python').decode())
+        pinned = up.runtime_dropin(['/x/python', 'bot.py'], '/new/python', '/srv/runtime/lib').decode()
+        self.assertIn('Environment="LD_LIBRARY_PATH=/srv/runtime/lib"', pinned)
 
     def test_sqlite_online_backup_and_independent_restore_are_consistent(self):
         source = self.root / 'source.sqlite3'
@@ -274,6 +296,15 @@ class CoordinatedUpdate(unittest.TestCase):
         (self.u.candidates['core'] / 'shared/workout_metrics.py').write_text('metrics')
         (self.u.candidates['gym'] / 'progressor_workout_metrics.py').write_text('metrics')
         self.u.check_helpers()
+        (self.u.candidates['core']/'shared/bootstrap.v1.js').write_text('canonical launch bridge')
+        for name in ('gym','food','supply'):
+            relative='static/webapp/assets/progressor-bootstrap.v1.js' if name=='food' else 'webapp/assets/progressor-bootstrap.v1.js'
+            target=self.u.candidates[name]/relative;target.parent.mkdir(parents=True);target.write_text('canonical launch bridge')
+        self.u.check_helpers()
+        food_bootstrap=self.u.candidates['food']/'static/webapp/assets/progressor-bootstrap.v1.js'
+        food_bootstrap.write_text('incompatible launch bridge')
+        with self.assertRaisesRegex(up.UpdateError,'incompatible_shared_helper:food/static/webapp/assets/'):self.u.check_helpers()
+        food_bootstrap.write_text('canonical launch bridge')
         (self.u.candidates['food'] / 'progressor_client.py').write_text('incompatible')
         with self.assertRaisesRegex(up.UpdateError, 'incompatible_shared_helper:food'): self.u.check_helpers()
 

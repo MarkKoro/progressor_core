@@ -9,6 +9,7 @@ from pathlib import Path
 import httpx
 from fastapi import HTTPException,Request
 from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
 from .auth import sign_assertion,verify_assertion
 from .billing import receipt,utc
 from .contracts import SOURCES,subject
@@ -32,6 +33,10 @@ def checked_payment(order,payment):
 async def reconcile_rub(engine,payment_id):
     if not re.fullmatch(r'[A-Za-z0-9-]{1,128}',payment_id): raise ValueError('invalid_payment_id')
     payment=await yookassa(engine.config,'GET','payments/'+payment_id)
+    return await run_in_threadpool(_apply_payment,engine,payment_id,payment)
+
+def _apply_payment(engine,payment_id,payment):
+    """Connections and complete ledger operations stay in their owning worker."""
     order=engine.billing.order((payment.get('metadata') or {}).get('progressor_order',''))
     if order['currency']!='RUB' or order['provider_id']!=payment_id: raise ValueError('unknown_provider_payment')
     checked_payment(order,payment)
@@ -52,6 +57,9 @@ async def reconcile_refund(engine,refund_id):
     refund=await yookassa(engine.config,'GET','refunds/'+refund_id)
     payment_id=refund['payment_id']
     await reconcile_rub(engine,payment_id)
+    await run_in_threadpool(_apply_refund,engine,refund_id,payment_id,refund)
+
+def _apply_refund(engine,refund_id,payment_id,refund):
     with engine.store.connection() as db:
         row=db.execute('SELECT * FROM bundle_orders WHERE provider_id=?',(payment_id,)).fetchone()
     if not row: raise ValueError('unknown_refund_payment')
@@ -66,9 +74,12 @@ async def reconcile_refund(engine,refund_id):
     if total>=order['amount']: engine.billing.settle(receipt(order,'refunded',payment_id),order['source'],verified_rub=True)
 
 async def reconcile_pending(engine):
-    with engine.store.connection() as db:
-        ids=[r[0] for r in db.execute("SELECT o.provider_id FROM bundle_orders o LEFT JOIN bundle_provider_checks c ON c.payment_id=o.provider_id WHERE o.currency='RUB' AND o.status IN ('pending','paid') AND o.provider_id IS NOT NULL AND (COALESCE(c.checked_at,0)<? OR o.status='pending') ORDER BY COALESCE(c.checked_at,0) LIMIT 10",(time.time()-300,))]
-        for identifier in ids: db.execute('INSERT INTO bundle_provider_checks VALUES(?,?) ON CONFLICT(payment_id) DO UPDATE SET checked_at=excluded.checked_at',(identifier,time.time()))
+    def pending():
+        with engine.store.connection() as db:
+            ids=[r[0] for r in db.execute("SELECT o.provider_id FROM bundle_orders o LEFT JOIN bundle_provider_checks c ON c.payment_id=o.provider_id WHERE o.currency='RUB' AND o.status IN ('pending','paid') AND o.provider_id IS NOT NULL AND (COALESCE(c.checked_at,0)<? OR o.status='pending') ORDER BY COALESCE(c.checked_at,0) LIMIT 10",(time.time()-300,))]
+            for identifier in ids: db.execute('INSERT INTO bundle_provider_checks VALUES(?,?) ON CONFLICT(payment_id) DO UPDATE SET checked_at=excluded.checked_at',(identifier,time.time()))
+        return ids
+    ids=await run_in_threadpool(pending)
     for payment_id in ids:
         try: await reconcile_rub(engine,payment_id)
         except Exception:
@@ -100,9 +111,12 @@ async def create_rub(engine,order,email):
     body={'amount':{'value':value,'currency':'RUB'},'capture':True,'confirmation':{'type':'redirect','return_url':engine.config.origin+'/progressor/subscribe?order='+order['id']},'description':f"Progressor: 3 продукта, {order['days']} дней",'metadata':{'progressor_order':order['id'],'progressor_user':order['user_id']},'receipt':{'customer':{'email':email},'items':[{'description':f"Общая подписка Progressor ({order['days']} дней)",'quantity':'1.00','amount':{'value':value,'currency':'RUB'},'vat_code':engine.config.yookassa_vat,'payment_mode':'full_payment','payment_subject':'service'}]}}
     from .contracts import canonical
     import json
-    with engine.store.connection() as db:
-        existing=db.execute('SELECT payload FROM bundle_provider_requests WHERE order_id=?',(order['id'],)).fetchone()
-        contact=db.execute('SELECT email FROM bundle_provider_contacts WHERE order_id=?',(order['id'],)).fetchone()
+    def load_request():
+        with engine.store.connection() as db:
+            existing=db.execute('SELECT payload FROM bundle_provider_requests WHERE order_id=?',(order['id'],)).fetchone()
+            contact=db.execute('SELECT email FROM bundle_provider_contacts WHERE order_id=?',(order['id'],)).fetchone()
+        return (dict(existing) if existing else None,dict(contact) if contact else None)
+    existing,contact=await run_in_threadpool(load_request)
     if existing:
         body=json.loads(existing['payload'])
         original_email=contact['email'] if contact else ((body.get('receipt') or {}).get('customer') or {}).get('email')
@@ -118,22 +132,27 @@ async def create_rub(engine,order,email):
         if type(enabled) is not bool:raise ValueError('invalid_merchant_receipt_mode')
         if enabled:body['receipt']['internet']=True
         else:body.pop('receipt')
-    with engine.store.connection() as db:
-        db.execute('BEGIN IMMEDIATE')
-        current=db.execute('SELECT status FROM bundle_orders WHERE id=?',(order['id'],)).fetchone()
-        if not current or current['status']!='pending':raise ValueError('order_not_pending')
-        old=db.execute('SELECT payload FROM bundle_provider_requests WHERE order_id=?',(order['id'],)).fetchone()
-        if old:
-            stored=json.loads(old['payload'])
-            contact=db.execute('SELECT email FROM bundle_provider_contacts WHERE order_id=?',(order['id'],)).fetchone()
-            original_email=contact['email'] if contact else ((stored.get('receipt') or {}).get('customer') or {}).get('email')
-            if original_email!=email: raise ValueError('immutable_receipt_email')
-            body=stored
-        else: db.execute('INSERT INTO bundle_provider_requests VALUES(?,?)',(order['id'],canonical(body)))
-        db.execute('INSERT OR IGNORE INTO bundle_provider_contacts VALUES(?,?)',(order['id'],email))
+    def reserve_request(body):
+        with engine.store.connection() as db:
+            db.execute('BEGIN IMMEDIATE')
+            current=db.execute('SELECT status FROM bundle_orders WHERE id=?',(order['id'],)).fetchone()
+            if not current or current['status']!='pending':raise ValueError('order_not_pending')
+            old=db.execute('SELECT payload FROM bundle_provider_requests WHERE order_id=?',(order['id'],)).fetchone()
+            if old:
+                stored=json.loads(old['payload'])
+                contact=db.execute('SELECT email FROM bundle_provider_contacts WHERE order_id=?',(order['id'],)).fetchone()
+                original_email=contact['email'] if contact else ((stored.get('receipt') or {}).get('customer') or {}).get('email')
+                if original_email!=email: raise ValueError('immutable_receipt_email')
+                body=stored
+            else: db.execute('INSERT INTO bundle_provider_requests VALUES(?,?)',(order['id'],canonical(body)))
+            db.execute('INSERT OR IGNORE INTO bundle_provider_contacts VALUES(?,?)',(order['id'],email))
+        return body
+    body=await run_in_threadpool(reserve_request,body)
     payment=await yookassa(engine.config,'POST','payments',json=body,headers={'Idempotence-Key':order['id']})
     checked_payment(order,payment)
-    with engine.store.connection() as db: db.execute('UPDATE bundle_orders SET provider_id=? WHERE id=? AND provider_id IS NULL',(payment['id'],order['id']))
+    def bind_payment():
+        with engine.store.connection() as db: db.execute('UPDATE bundle_orders SET provider_id=? WHERE id=? AND provider_id IS NULL',(payment['id'],order['id']))
+    await run_in_threadpool(bind_payment)
     return payment.get('confirmation',{}).get('confirmation_url')
 
 def install_routes(app,engine,claims):
@@ -165,7 +184,7 @@ def install_routes(app,engine,claims):
     async def ai(request:Request):
         source,body=await private(request)
         if set(engine(request).config.enabled_domains)!=set(SOURCES): return None
-        try: return build_ai_context(engine(request).store,subject(body['user_id']),source)
+        try: return await run_in_threadpool(build_ai_context,engine(request).store,subject(body['user_id']),source)
         except (KeyError,ValueError,TypeError): raise HTTPException(422,'Invalid identity')
 
     @app.post('/internal/v1/profile')
@@ -173,7 +192,7 @@ def install_routes(app,engine,claims):
         source,body=await private(request)
         from .context import build_context
         try:
-            data=build_context(engine(request).store,subject(body['user_id']),target=source,enabled_sources=engine(request).config.enabled_domains)
+            data=await run_in_threadpool(build_context,engine(request).store,subject(body['user_id']),target=source,enabled_sources=engine(request).config.enabled_domains)
             return data['profile']
         except (KeyError,ValueError,TypeError): raise HTTPException(422,'Invalid identity')
 
@@ -182,7 +201,7 @@ def install_routes(app,engine,claims):
         source,body=await private(request)
         if source!='food': raise HTTPException(403,'Food sender only')
         from .notifications import candidate
-        try:
+        def compute():
             people=body['people']
             if not isinstance(people,list) or len(people)>50: raise ValueError('batch')
             result=[]
@@ -194,12 +213,13 @@ def install_routes(app,engine,claims):
                 value=candidate(engine(request).store,uid,prefs,enabled_sources=engine(request).config.enabled_domains)
                 if value: result.append({'user_id':uid,**value})
             return {'items':result}
+        try: return await run_in_threadpool(compute)
         except (KeyError,ValueError,TypeError): raise HTTPException(422,'Invalid preferences')
 
     @app.post('/internal/v1/grants')
     async def grants(request:Request):
         source,body=await private(request)
-        return engine(request).billing.grants(str(body.get('after','')),source)
+        return await run_in_threadpool(engine(request).billing.grants,str(body.get('after','')),source)
 
     @app.post('/internal/v1/subscription-notices/claim')
     async def claim_notices(request:Request):
@@ -219,20 +239,20 @@ def install_routes(app,engine,claims):
     async def quote(request:Request):
         available(request)
         source,body=await private(request)
-        try: return engine(request).billing.quote(body['user_id'],source,body['plan'],'XTR',body['order_id'],body['terms'])
+        try: return await run_in_threadpool(engine(request).billing.quote,body['user_id'],source,body['plan'],'XTR',body['order_id'],body['terms'])
         except (KeyError,ValueError,TypeError): raise HTTPException(409,'Quote rejected')
 
     @app.post('/internal/v1/bundle/catalog')
     async def private_catalog(request:Request):
         _,body=await private(request)
-        if 'user_id' not in body:return engine(request).billing.catalog()
-        try:return personal_display(request,subject(body['user_id']))
+        if 'user_id' not in body:return await run_in_threadpool(engine(request).billing.catalog)
+        try:return await run_in_threadpool(personal_display,request,subject(body['user_id']))
         except (KeyError,ValueError,TypeError):raise HTTPException(503,'Personal pricing temporarily unavailable')
 
     @app.post('/internal/v1/bundle/cancel')
     async def cancel_order(request:Request):
         _,body=await private(request)
-        try:return engine(request).billing.cancel(body['user_id'],body['order_id'])
+        try:return await run_in_threadpool(engine(request).billing.cancel,body['user_id'],body['order_id'])
         except (KeyError,ValueError,TypeError):raise HTTPException(409,'Payment already processing')
 
     @app.post('/internal/v1/bot-context')
@@ -240,7 +260,7 @@ def install_routes(app,engine,claims):
         source,body=await private(request)
         from .context import build_context
         try:
-            data=build_context(engine(request).store,subject(body['user_id']),target=source,enabled_sources=engine(request).config.enabled_domains)
+            data=await run_in_threadpool(build_context,engine(request).store,subject(body['user_id']),target=source,enabled_sources=engine(request).config.enabled_domains)
             return {k:data.get(k) for k in ('inline_hint','access','activity','nutrition','profile')}
         except (KeyError,ValueError,TypeError):raise HTTPException(422,'Invalid identity')
 
@@ -248,20 +268,20 @@ def install_routes(app,engine,claims):
     async def precheckout(request:Request):
         available(request)
         source,body=await private(request)
-        try: return engine(request).billing.precheckout(body,source)
+        try: return await run_in_threadpool(engine(request).billing.precheckout,body,source)
         except (KeyError,ValueError,TypeError): raise HTTPException(409,'Checkout rejected')
 
     @app.post('/internal/v1/bundle/precheckout-rejected')
     async def precheckout_rejected(request:Request):
         available(request);source,body=await private(request)
-        try:return engine(request).billing.precheckout_rejected(subject(body['user_id']),body['order_id'],body['checkout_id'],source)
+        try:return await run_in_threadpool(engine(request).billing.precheckout_rejected,subject(body['user_id']),body['order_id'],body['checkout_id'],source)
         except (KeyError,ValueError,TypeError):raise HTTPException(409,'Checkout rejection mismatch')
 
     @app.post('/internal/v1/bundle/invoice-link')
     async def bot_invoice_link(request:Request):
         available(request);source,body=await private(request)
         try:
-            order=engine(request).billing.order(body['order_id'],subject(body['user_id']))
+            order=await run_in_threadpool(engine(request).billing.order,body['order_id'],subject(body['user_id']))
             if order['source']!=source or order['currency']!='XTR' or order['status']!='pending':raise ValueError('invoice_owner_mismatch')
             if order.get('pricing_json'):
                 import json
@@ -273,7 +293,7 @@ def install_routes(app,engine,claims):
     @app.post('/internal/v1/bundle/receipt')
     async def paid(request:Request):
         source,body=await private(request)
-        try: return engine(request).billing.settle(body,source)
+        try: return await run_in_threadpool(engine(request).billing.settle,body,source)
         except (KeyError,ValueError,TypeError): raise HTTPException(409,'Receipt rejected')
 
     @app.get('/api/v1/bundle/catalog')
@@ -304,7 +324,7 @@ def install_routes(app,engine,claims):
     @app.post('/api/v1/me/bundle/cancel')
     async def cancel_personal(request:Request):
         user=claims(request);body=await request.json()
-        try:return engine(request).billing.cancel(user['sub'],body['order_id'])
+        try:return await run_in_threadpool(engine(request).billing.cancel,user['sub'],body['order_id'])
         except (KeyError,ValueError,TypeError):raise HTTPException(409,'Payment already processing')
 
     @app.post('/api/v1/me/bundle/invoice')
@@ -313,7 +333,7 @@ def install_routes(app,engine,claims):
         user=claims(request)
         try:
             body=await request.json()
-            order=engine(request).billing.quote(user['sub'],body['source'],body['plan'],'XTR',body['order_id'],body['terms'])
+            order=await run_in_threadpool(engine(request).billing.quote,user['sub'],body['source'],body['plan'],'XTR',body['order_id'],body['terms'])
             if order['status']!='pending': raise ValueError('order_not_pending')
             return {'order_id':order['id'],'invoice_url':await invoice(engine(request),order)}
         except (KeyError,ValueError,TypeError): raise HTTPException(409,'Invoice rejected')
@@ -340,34 +360,38 @@ def install_routes(app,engine,claims):
     @app.post('/internal/v1/website/approve')
     async def approve(request:Request):
         _,body=await private(request)
-        try:
+        def approve_owned_challenge():
             uid=subject(body['user_id'])
             with engine(request).store.connection() as db:
                 changed=db.execute('UPDATE website_logins SET user_id=? WHERE id=? AND created_at>? AND consumed=0 AND (user_id IS NULL OR user_id=?)',(uid,body['challenge'],time.time()-300,uid))
                 if changed.rowcount!=1: raise ValueError('expired_challenge')
+        try: await run_in_threadpool(approve_owned_challenge)
         except (KeyError,TypeError,ValueError): raise HTTPException(409,'Login expired')
         return {'ok':True}
 
     @app.post('/api/v1/website/poll')
     async def poll(request:Request):
-        body=await request.json(); token=None
-        with engine(request).store.connection() as db:
-            db.execute('BEGIN IMMEDIATE')
-            row=db.execute('SELECT * FROM website_logins WHERE id=?',(str(body.get('challenge','')),)).fetchone()
-            if not row or row['created_at']<time.time()-300 or row['consumed'] or not secrets.compare_digest(row['poll_hash'],hashlib.sha256(str(body.get('poll_secret','')).encode()).hexdigest()): raise HTTPException(401,'Login expired')
-            if row['user_id']:
-                stamp=int(time.time()); token=sign_assertion({'id':int(row['user_id'])},stamp,'core',engine(request).config.signing_key,ttl=900)
-                db.execute('UPDATE website_logins SET consumed=1 WHERE id=?',(row['id'],))
-                db.execute('INSERT INTO website_sessions VALUES(?,?,?) ON CONFLICT(token_hash) DO UPDATE SET expires_at=excluded.expires_at',(hashlib.sha256(token.encode()).hexdigest(),row['user_id'],stamp+900))
-        return {'approved':bool(token),'token':token}
+        body=await request.json()
+        def consume_challenge():
+            token=None
+            with engine(request).store.connection() as db:
+                db.execute('BEGIN IMMEDIATE')
+                row=db.execute('SELECT * FROM website_logins WHERE id=?',(str(body.get('challenge','')),)).fetchone()
+                if not row or row['created_at']<time.time()-300 or row['consumed'] or not secrets.compare_digest(row['poll_hash'],hashlib.sha256(str(body.get('poll_secret','')).encode()).hexdigest()): raise HTTPException(401,'Login expired')
+                if row['user_id']:
+                    stamp=int(time.time()); token=sign_assertion({'id':int(row['user_id'])},stamp,'core',engine(request).config.signing_key,ttl=900)
+                    db.execute('UPDATE website_logins SET consumed=1 WHERE id=?',(row['id'],))
+                    db.execute('INSERT INTO website_sessions VALUES(?,?,?) ON CONFLICT(token_hash) DO UPDATE SET expires_at=excluded.expires_at',(hashlib.sha256(token.encode()).hexdigest(),row['user_id'],stamp+900))
+            return {'approved':bool(token),'token':token}
+        return await run_in_threadpool(consume_challenge)
 
     @app.post('/api/v1/website/checkout')
     async def website_checkout(request:Request):
         available(request)
-        user=web_claims(request)
+        user=await run_in_threadpool(web_claims,request)
         try:
             body=await request.json(); source=body.get('source','food')
-            order=engine(request).billing.quote(user['sub'],source,body['plan'],'RUB',body['order_id'],body['terms'])
+            order=await run_in_threadpool(engine(request).billing.quote,user['sub'],source,body['plan'],'RUB',body['order_id'],body['terms'])
             url=await create_rub(engine(request),order,body['email'])
             if not str(url or '').startswith('https://'): raise ValueError('invalid_confirmation')
             return {'order_id':order['id'],'confirmation_url':url}
@@ -382,17 +406,17 @@ def install_routes(app,engine,claims):
 
     @app.post('/api/v1/website/cancel')
     async def website_cancel(request:Request):
-        user=web_claims(request);body=await request.json()
-        try:return engine(request).billing.cancel(user['sub'],body['order_id'])
+        user=await run_in_threadpool(web_claims,request);body=await request.json()
+        try:return await run_in_threadpool(engine(request).billing.cancel,user['sub'],body['order_id'])
         except (KeyError,ValueError,TypeError):raise HTTPException(409,'Payment already processing')
 
     @app.post('/api/v1/website/status')
     async def website_status(request:Request):
-        user=web_claims(request); body=await request.json()
+        user=await run_in_threadpool(web_claims,request); body=await request.json()
         try:
-            order=engine(request).billing.order(body['order_id'],user['sub'])
+            order=await run_in_threadpool(engine(request).billing.order,body['order_id'],user['sub'])
             if order['currency']=='RUB' and order['provider_id'] and order['status']=='pending':
-                await reconcile_rub(engine(request),order['provider_id']); order=engine(request).billing.order(order['id'],user['sub'])
+                await reconcile_rub(engine(request),order['provider_id']); order=await run_in_threadpool(engine(request).billing.order,order['id'],user['sub'])
             return {'id':order['id'],'status':order['status'],
                     'next_step':{'label':'Настроить связь продуктов','url':'https://t.me/'+BOT_NAMES[order['source']]+'?start=pgsettings'} if order['status']=='paid' else None}
         except ValueError: raise HTTPException(404,'Order not found')

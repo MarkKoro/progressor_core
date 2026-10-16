@@ -6,6 +6,7 @@ import base64
 import fcntl
 import hashlib
 import io
+import importlib.util
 import json
 import os
 import re
@@ -201,7 +202,17 @@ def unit_info(unit):
     if any('\n' in x or '\r' in x for x in args): raise UpdateError('unsafe_service_argument:' + unit)
     return {'args': args, 'active': fields['ActiveState'] == 'active', 'cwd': fields['WorkingDirectory'],
             'pid': int(fields.get('MainPID', '0')), 'restarts': int(fields.get('NRestarts', '0')),
-            'fragment': fields['FragmentPath']}
+            'fragment': fields['FragmentPath'], 'sqlite_library': loaded_sqlite_library(int(fields.get('MainPID', '0')))}
+
+
+def loaded_sqlite_library(pid):
+    if pid <= 0: return None
+    try:
+        paths = {line.split()[-1] for line in Path('/proc', str(pid), 'maps').read_text().splitlines()
+                 if '/libsqlite3.so' in line}
+        if len(paths) == 1: return str(Path(paths.pop()).parent)
+    except OSError: pass
+    return None
 
 
 def signature(db):
@@ -229,10 +240,11 @@ def verified_database_backup(source, target):
             'integrity': 'ok', 'restored_copy': 'ok', **result}
 
 
-def runtime_dropin(args, python):
+def runtime_dropin(args, python, sqlite_library=None):
     def quote(value):
         return '"' + value.replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%').replace('$', '$$') + '"'
-    return ('[Service]\nExecStart=\nExecStart=' + ' '.join(quote(x) for x in [str(python), *args[1:]]) + '\n').encode()
+    environment = 'Environment=' + quote('LD_LIBRARY_PATH='+str(sqlite_library)) + '\n' if sqlite_library else ''
+    return ('[Service]\n' + environment + 'ExecStart=\nExecStart=' + ' '.join(quote(x) for x in [str(python), *args[1:]]) + '\n').encode()
 
 
 def tree_size(folder, exclude=()):
@@ -277,6 +289,7 @@ class Updater:
                       'core_before': str((CORE / 'current').resolve(strict=True)), 'core_after': None,
                       'worker_frozen': False, 'history': []}
         self.candidates = {}; self.runtime_plans = {}; self.python_for_unit = {}; self.changed = set()
+        self.sqlite_module = None
 
     def save(self, phase=None, **fields):
         if phase: self.state['phase'] = phase
@@ -329,6 +342,13 @@ class Updater:
         self.state['core_revision_before'] = (old_core / 'REVISION').read_text().strip()
         if 'core' in self.selected and self.state['core_revision_before'] != self.state['repositories']['core']['target']:
             self.changed.add('core')
+        sqlite_helper = self.candidates['core'] / 'deploy/sqlite_runtime.py'
+        if sqlite_helper.is_file():
+            module_spec = importlib.util.spec_from_file_location('candidate_sqlite_runtime', sqlite_helper)
+            self.sqlite_module = importlib.util.module_from_spec(module_spec)
+            module_spec.loader.exec_module(self.sqlite_module)
+            self.state['sqlite_library'] = str(self.sqlite_module.target(RUNTIMES/'sqlite', self.sqlite_module.specification()))
+            self.state['sqlite_units'] = []
         for unit, (name, kind, _) in UNIT_SPECS.items():
             if kind == 'legacy' and text_command(['systemctl', 'is-active', unit], allow_failure=True) != 'active': continue
             info = unit_info(unit)
@@ -337,6 +357,9 @@ class Updater:
             self.state['units'][unit] = info
             self.python_for_unit[unit] = info['args'][0]
             if name not in self.selected: continue
+            if self.sqlite_module:
+                self.state['sqlite_units'].append(unit)
+                if info.get('sqlite_library') != self.state['sqlite_library']: self.changed.add(name)
             runtime_key = name + '-' + hashlib.sha256(info['args'][0].encode()).hexdigest()[:10]
             if runtime_key in self.runtime_plans: continue
             report = self.folder / (runtime_key + '-requirements.json')
@@ -363,6 +386,13 @@ class Updater:
                 a, b = self.candidates['core'] / 'shared' / src, self.candidates[name] / dst
                 if not a.is_file() or not b.is_file() or a.read_bytes() != b.read_bytes():
                     raise UpdateError('incompatible_shared_helper:' + name + '/' + dst)
+        bootstrap=self.candidates['core']/'shared/bootstrap.v1.js'
+        if bootstrap.is_file():
+            for name in ('gym','food','supply'):
+                relative='static/webapp/assets/progressor-bootstrap.v1.js' if name=='food' else 'webapp/assets/progressor-bootstrap.v1.js'
+                mirror=self.candidates[name]/relative
+                if not mirror.is_file() or mirror.read_bytes()!=bootstrap.read_bytes():
+                    raise UpdateError('incompatible_shared_helper:'+name+'/'+relative)
 
     def prepare_runtimes(self):
         prepared = {}
@@ -371,7 +401,8 @@ class Updater:
             if not item['needs']: continue
             name = item['name']; source = self.candidates[name]
             freeze = text_command([item['python'], '-m', 'pip', 'freeze'])
-            fingerprint = hashlib.sha256((freeze + sha(source / 'requirements.txt')).encode()).hexdigest()
+            inputs=[source/'requirements.txt',source/'constraints.txt']
+            fingerprint = hashlib.sha256((freeze + ''.join(sha(p) for p in inputs if p.is_file())).encode()).hexdigest()
             if name == 'core':
                 core_release = CORE / 'releases' / (self.stamp + '-' + self.state['repositories']['core']['target'][:12])
                 extract_revision(name, self.state['repositories']['core']['target'], core_release)
@@ -389,10 +420,15 @@ class Updater:
                 RUNTIMES.mkdir(exist_ok=True, mode=0o755); RUNTIMES.chmod(0o755)
                 if name != 'core': (RUNTIMES / name).chmod(0o755)
                 command(['/usr/bin/python3', '-m', 'venv', venv])
+                # Retain the old inventory for diagnosis, never seed the new
+                # runtime with unmanaged packages. Its old venv stays available
+                # unchanged for rollback; the repository declares every root.
                 baseline = self.folder / (key + '-baseline.txt'); baseline.write_text(freeze + '\n')
                 python = venv / 'bin/python'
-                command([python, '-m', 'pip', 'install', '--disable-pip-version-check', '-r', baseline],
-                        timeout=600, logfile=self.folder / (key + '-baseline-install.log'))
+                installer=re.search(r'(?m)^pip==([0-9]+(?:\.[0-9]+){1,3})\s*$',(source/'requirements.txt').read_text())
+                if installer:
+                    command([python,'-m','pip','install','--disable-pip-version-check','--only-binary=:all:','pip=='+installer[1]],
+                            timeout=300,logfile=self.folder/(key+'-installer.log'))
                 command([python, '-m', 'pip', 'install', '--disable-pip-version-check', '-r', source / 'requirements.txt'],
                         cwd=source, timeout=600, logfile=self.folder / (key + '-target-install.log'))
                 command([python, '-m', 'pip', 'check'], logfile=self.folder / (key + '-final-pip-check.log'))
@@ -403,6 +439,12 @@ class Updater:
         if core_release:
             (core_release / 'REVISION').write_text(self.state['repositories']['core']['target'] + '\n')
             self.state['core_after'] = str(core_release)
+        if self.sqlite_module:
+            emit('Проверяю отдельную библиотеку базы данных…')
+            library, probes = self.sqlite_module.provision(RUNTIMES/'sqlite', self.folder/'sqlite-build',
+                [self.python_for_unit[u] for u in self.state['sqlite_units']])
+            if str(library) != self.state['sqlite_library']: raise UpdateError('sqlite_runtime_target_changed')
+            self.save(sqlite_probes=probes)
         self.check_helpers()
 
     def test_candidates(self):
@@ -426,7 +468,9 @@ class Updater:
                     args += ['-p', pattern]
                 args += ['-q']
                 logfile = self.folder / (name + '-tests-' + str(i) + '.log')
-                command(args, cwd=source, env=offline_environment(tmp), timeout=360, logfile=logfile)
+                env=offline_environment(tmp)
+                if self.state.get('sqlite_library'): env['LD_LIBRARY_PATH']=self.state['sqlite_library']
+                command(args, cwd=source, env=env, timeout=360, logfile=logfile)
                 match = re.search(r'Ran (\d+) tests?', logfile.read_text())
                 if not match or int(match[1]) == 0: raise UpdateError('no_contract_tests_ran:' + name)
                 results[name] = results.get(name, 0) + int(match[1])
@@ -438,6 +482,8 @@ class Updater:
             for unit in self.state['units']:
                 info = unit_info(unit)
                 if not info['active'] or not info['pid']: raise UpdateError('service_not_running:' + unit)
+                if self.state.get('switch_started') and self.state['phase'] not in {'rolling_back','rolled_back'} and unit in self.state.get('sqlite_units', []):
+                    if info.get('sqlite_library') != self.state['sqlite_library']: raise UpdateError('service_sqlite_runtime_mismatch:'+unit)
                 url = UNIT_SPECS[unit][2]
                 if url:
                     with urllib.request.urlopen(url, timeout=3) as response: data = json.load(response)
@@ -503,6 +549,12 @@ class Updater:
                          *[SYSTEMD / u for u in self.state['units']],
                          *[SYSTEMD / (u + '.d') for u in self.state['units']]]:
                 if path.exists(): tar.add(path, arcname=str(path).lstrip('/'))
+            # Python package freeze cannot reproduce a separately pinned C
+            # library. Include the small immutable runtime actually in use.
+            for library in sorted({u.get('sqlite_library') for u in self.state['units'].values()} - {None}):
+                runtime=Path(library).parent
+                if runtime.is_relative_to(RUNTIMES/'sqlite'):
+                    tar.add(runtime, arcname=str(runtime).lstrip('/'))
         with tarfile.open(archive) as tar:
             names = set(tar.getnames())
             required = {'previous-core-release/progressor_core/app.py', 'etc/progressor/core.env', 'etc/progressor/signing.key'}
@@ -605,8 +657,9 @@ class Updater:
             old = self.state['units'][unit]['args'][0]
             python = self.python_for_unit[unit]
             if UNIT_SPECS[unit][0] == 'core': python = str(CORE / 'current/.venv/bin/python')
-            if old != python:
-                atomic_file(SYSTEMD / (unit + '.d') / DROPIN, runtime_dropin(self.state['units'][unit]['args'], python))
+            library=self.state.get('sqlite_library') if unit in self.state.get('sqlite_units', []) else None
+            if old != python or library:
+                atomic_file(SYSTEMD / (unit + '.d') / DROPIN, runtime_dropin(self.state['units'][unit]['args'], python, library))
         command(['systemctl', 'daemon-reload'])
 
     def start_units(self):

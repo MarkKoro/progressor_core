@@ -13,6 +13,7 @@ CREATE INDEX IF NOT EXISTS membership_user ON memberships(user_id);
 CREATE TABLE IF NOT EXISTS events(event_id TEXT PRIMARY KEY, hash TEXT NOT NULL, source TEXT NOT NULL, user_id TEXT NOT NULL, type TEXT NOT NULL, occurred_at TEXT NOT NULL, received_at TEXT NOT NULL, correlation_id TEXT NOT NULL, envelope TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS entities(source TEXT NOT NULL, entity_id TEXT NOT NULL, user_id TEXT NOT NULL, revision INTEGER NOT NULL, hash TEXT NOT NULL, event_id TEXT NOT NULL, type TEXT NOT NULL, deleted INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(source,entity_id));
 CREATE INDEX IF NOT EXISTS entities_user ON entities(user_id,source,deleted);
+CREATE INDEX IF NOT EXISTS entities_owner_kind ON entities(user_id,deleted,entity_id);
 CREATE TABLE IF NOT EXISTS source_state(source TEXT PRIMARY KEY, status TEXT NOT NULL, observed_at REAL NOT NULL, last_success REAL, failures INTEGER NOT NULL DEFAULT 0, retry_at REAL NOT NULL DEFAULT 0, reason TEXT);
 CREATE TABLE IF NOT EXISTS adapter_state(source TEXT NOT NULL, entity_id TEXT NOT NULL, user_id TEXT NOT NULL, revision INTEGER NOT NULL, hash TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(source,entity_id));
 CREATE TABLE IF NOT EXISTS dead_letters(id INTEGER PRIMARY KEY, source TEXT NOT NULL, reason TEXT NOT NULL, payload_hash TEXT NOT NULL, received_at TEXT NOT NULL);
@@ -134,10 +135,85 @@ class Store:
     def data(self, user_id):
         import json
         with self.connection() as db:
+            db.execute('BEGIN')
             entities = [{**dict(row), 'payload': json.loads(row['payload'])} for row in db.execute('SELECT e.*,ev.occurred_at FROM entities e JOIN events ev ON ev.event_id=e.event_id WHERE e.user_id=? AND e.deleted=0', (user_id,))]
             memberships = [dict(row) for row in db.execute('SELECT source,local_id,active FROM memberships WHERE user_id=?', (user_id,))]
             state = {row['source']: dict(row) for row in db.execute('SELECT * FROM source_state')}
         return entities, memberships, state
+
+    def membership_snapshot(self, user_id):
+        """Only subscription membership metadata, never coach/health profiles."""
+        import json
+        with self.connection() as db:
+            db.execute('BEGIN')
+            entities=[{**dict(row),'payload':json.loads(row['payload'])} for row in db.execute("SELECT * FROM entities WHERE user_id=? AND deleted=0 AND entity_id GLOB 'profile:*' AND json_extract(payload,'$.profile_kind') IS NULL",(user_id,))]
+            members=[dict(row) for row in db.execute('SELECT source,local_id,active FROM memberships WHERE user_id=?',(user_id,))]
+            state={row['source']:dict(row) for row in db.execute('SELECT * FROM source_state')}
+        return entities,members,state
+
+    def settings_snapshot(self, user_id):
+        """Request-owned weight/coach/rhythm inputs; no journal/intake history.
+
+        Rhythm uses workout identity and timing, not per-exercise load vectors.
+        Keep original event IDs/revisions and optional fields intact.
+        """
+        import json
+        with self.connection() as db:
+            db.execute('BEGIN')
+            rows=db.execute("""SELECT e.source,e.entity_id,e.user_id,e.revision,e.hash,e.event_id,e.type,e.deleted,
+                CASE WHEN e.source='gym' AND e.entity_id GLOB 'workout:*'
+                     THEN json_remove(e.payload,'$.strength_metrics') ELSE e.payload END AS payload,ev.occurred_at
+                FROM entities e JOIN events ev ON ev.event_id=e.event_id WHERE e.user_id=? AND e.deleted=0
+                AND (e.entity_id GLOB 'profile:*' OR e.entity_id GLOB 'weight:*'
+                     OR e.entity_id GLOB 'workout:*' OR e.entity_id GLOB 'target:*')""",(user_id,))
+            entities=[{**dict(row),'payload':json.loads(row['payload'])} for row in rows]
+            members=[dict(row) for row in db.execute('SELECT source,local_id,active FROM memberships WHERE user_id=?',(user_id,))]
+            state={row['source']:dict(row) for row in db.execute('SELECT * FROM source_state')}
+        return entities,members,state
+
+    def context_snapshot(self, user_id, *, workout_day=None):
+        """One request-owned projection, without decoding every meal/intake.
+
+        Food daily aggregates own the journal totals. Keep the last 90 intake
+        rows and the latest real taken action for goal-review completion, while
+        counting lifetime taken rows in SQL. Other readers retain full data().
+        No cached access decision survives the request.
+        """
+        import json
+        payload='e.payload'
+        arguments=[user_id,user_id]
+        if workout_day is not None:
+            from datetime import date
+            day=date.fromisoformat(workout_day).isoformat()+'T00:00:00+03:00'
+            # Keep every session's metadata for rhythm/completion, but detailed
+            # vectors only around the requested day's 90-day comparison window.
+            # One-day margins retain fractional-second and offset boundaries.
+            payload="CASE WHEN e.source='gym' AND e.entity_id GLOB 'workout:*' AND (julianday(json_extract(e.payload,'$.completed_at'))<julianday(?,'-91 days') OR julianday(json_extract(e.payload,'$.completed_at'))>=julianday(?,'+2 days')) THEN json_remove(e.payload,'$.strength_metrics') ELSE e.payload END"
+            arguments.extend([day,day])
+        arguments.append(user_id)
+        with self.connection() as db:
+            db.execute('BEGIN')
+            rows = db.execute('''WITH recent_intakes AS (
+                SELECT entity_id FROM entities WHERE user_id=? AND source='supply'
+                AND deleted=0 AND entity_id GLOB 'intake:*'
+                ORDER BY json_extract(payload,'$.source_local_date') DESC,entity_id DESC LIMIT 90
+            ), last_taken AS (
+                SELECT e.entity_id FROM entities e JOIN events ev ON ev.event_id=e.event_id
+                WHERE e.user_id=? AND e.source='supply' AND e.deleted=0 AND e.entity_id GLOB 'intake:*'
+                AND json_extract(e.payload,'$.status')='taken'
+                AND coalesce(json_extract(e.payload,'$.backfilled'),0)=0
+                ORDER BY ev.occurred_at DESC,e.entity_id DESC LIMIT 1
+            ) SELECT e.source,e.entity_id,e.user_id,e.revision,e.hash,e.event_id,e.type,e.deleted,'''+payload+''' AS payload,ev.occurred_at FROM entities e JOIN events ev ON ev.event_id=e.event_id
+              WHERE e.user_id=? AND e.deleted=0
+              AND NOT(e.source='food' AND e.entity_id GLOB 'meal:*')
+              AND (e.source!='supply' OR e.entity_id NOT GLOB 'intake:*'
+                   OR e.entity_id IN (SELECT entity_id FROM recent_intakes UNION SELECT entity_id FROM last_taken))''',
+                arguments)
+            entities=[{**dict(row),'payload':json.loads(row['payload'])} for row in rows]
+            memberships=[dict(row) for row in db.execute('SELECT source,local_id,active FROM memberships WHERE user_id=?',(user_id,))]
+            state={row['source']:dict(row) for row in db.execute('SELECT * FROM source_state')}
+            taken=db.execute("SELECT count(*) FROM entities WHERE user_id=? AND source='supply' AND deleted=0 AND entity_id GLOB 'intake:*' AND json_extract(payload,'$.status')='taken'",(user_id,)).fetchone()[0]
+        return (entities,memberships,state),{'supply_taken_count':taken}
 
     def remember(self, user_id, rule, window, recommendation):
         fingerprint = digest(recommendation) if recommendation else None

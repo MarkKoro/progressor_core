@@ -33,10 +33,10 @@ def record(db,event,previous):
         db.execute('INSERT OR IGNORE INTO connection_changes VALUES(?,?,?,?,?,?)',(digest([event['event_id'],kind]),event['user_id'],event['source'],kind,stamp,canonical(body)))
         db.execute('DELETE FROM connection_changes WHERE observed_at<?',(stamp-30*86400,))
 
-def recent(store,user_id,now=None):
+def recent(store,user_id,now=None,*,snapshot=None):
     from .connections import permitted_entities,preferences
     now=now or datetime.now(timezone.utc);uid=subject(user_id);policy=preferences(store,uid,now.timestamp())
-    entities,_,_=permitted_entities(store,uid,now);allowed={e['source'] for e in entities}
+    entities,_,_=permitted_entities(store,uid,now,snapshot=snapshot);allowed={e['source'] for e in entities}
     if policy['rest_active']:allowed=set()
     with store.connection() as db:
         rows=[dict(r) for r in db.execute('SELECT * FROM connection_changes WHERE user_id=? AND observed_at>? AND observed_at<=? ORDER BY observed_at DESC LIMIT 100',(uid,(now-timedelta(days=7)).timestamp(),now.timestamp())) if r['source'] in allowed]
@@ -53,13 +53,13 @@ def recent(store,user_id,now=None):
         result.append({**row,'text':text})
     return {'items':result,'message':'Изменения в ваших записях за неделю. Совпадение по времени не устанавливает причину самочувствия.'}
 
-def hints(store,user_id,target,now=None):
+def hints(store,user_id,target,now=None,*,snapshot=None,changes=None):
     from .connections import preferences,permitted_entities
     now=now or datetime.now(timezone.utc);policy=preferences(store,user_id,now.timestamp())
     if not policy['hints'] or policy['rest_active']:return []
-    entities,_,_=permitted_entities(store,user_id,now)
+    entities,_,_=permitted_entities(store,user_id,now,snapshot=snapshot)
     if target not in {e['source'] for e in entities}:return []
-    changes=recent(store,user_id,now)['items'];result=[]
+    changes=changes if changes is not None else recent(store,user_id,now,snapshot=snapshot)['items'];result=[]
     for item in changes:
         if now.timestamp()-item['observed_at']>2*86400:continue
         if item['kind']=='weight' and policy['weight_notifications'] and target=='food' and policy['sources']['food']:

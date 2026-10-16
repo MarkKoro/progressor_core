@@ -13,11 +13,11 @@ NAMES = {'gym': 'Gym Diary', 'food': 'Food', 'supply': 'Supply'}
 def subscription_view(store, user_id, enabled_sources=SOURCES, now=None):
     user_id = subject(user_id)
     now = now or datetime.now(timezone.utc)
-    entities, memberships, states = store.data(user_id)
+    entities, memberships, states = store.membership_snapshot(user_id)
     access = entitlements(store, user_id, now, entities)
     profiles = {e['source']: e['payload'] for e in entities
                 if e['entity_id'].startswith('profile:')
-                and e['payload'].get('profile_kind') not in ('reported_health', 'reported_nutrition')}
+                and e['payload'].get('profile_kind') is None}
     products = []
     for source in SOURCES:
         observed = states.get(source, {})

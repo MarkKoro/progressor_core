@@ -1,5 +1,6 @@
 """Membership is identity, never a paid entitlement. Source data stays source-owned."""
 from datetime import datetime,timezone
+import json
 from .contracts import SOURCES
 
 
@@ -15,7 +16,11 @@ def active_until(value,now=None):
 
 def entitlements(store,user_id,now=None,entities=None):
     now=now or datetime.now(timezone.utc)
-    entities=entities if entities is not None else store.data(user_id)[0]
+    if entities is None:
+        # Launch/subscription checks need membership profiles, never every
+        # historical workout, meal or supplement mark of this account.
+        with store.connection() as db:
+            entities=[{**dict(row),'payload':json.loads(row['payload'])} for row in db.execute("SELECT source,entity_id,payload FROM entities WHERE user_id=? AND deleted=0 AND entity_id GLOB 'profile:*'",(user_id,))]
     native={source:None for source in SOURCES}
     for entity in entities:
         payload=entity['payload']

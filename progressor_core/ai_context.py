@@ -19,11 +19,17 @@ PROMPT = '''Общий контекст Progressor — дополнительн�
 
 def build_ai_context(store, user_id, target, now=None):
     now = now or datetime.now(timezone.utc)
-    context = build_context(store, user_id, now=now, target=target)
+    from .adapters import zone
+    request_data=store.context_snapshot(user_id,workout_day=now.astimezone(zone('Europe/Moscow')).date().isoformat())
+    context = build_context(store, user_id, now=now, target=target, _request_data=request_data)
     if not context['access']['domains'].get(target) or target not in context['memberships']: return None
-    entities = store.data(user_id)[0]
+    entities = request_data[0][0]
     fresh = {s for s, state in context['sources'].items() if state['status'] == 'ok' and s != target}
-    enrich_workouts([e for e in entities if context['sources'].get(e['source'],{}).get('status')=='ok'],now)
+    fresh_entities=[e for e in entities if context['sources'].get(e['source'],{}).get('status')=='ok']
+    recent_workouts=sorted([e for e in fresh_entities if e['source']=='gym' and e['entity_id'].startswith('workout:')
+        and now-timedelta(days=14)<=datetime.fromisoformat(e['payload']['completed_at'].replace('Z','+00:00'))<=now],
+        key=lambda e:e['payload']['completed_at'])[-20:]
+    enrich_workouts(fresh_entities,now,selected_ids={e['entity_id'] for e in recent_workouts})
     from .connections import preferences
     result = {'schema_version':1, 'prompt_version':PROMPT_VERSION,
               'permission_revision':preferences(store,user_id)['revision'],

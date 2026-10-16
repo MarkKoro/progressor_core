@@ -1,6 +1,7 @@
 """Own-account settings; trusted source control never widens trainer AI scope."""
 import json
 from fastapi import HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 from .contracts import subject
 from . import connections as links
 from shared.progressor_client import verify_control
@@ -18,9 +19,11 @@ def install(app,engine,claims):
 
     def read(store,uid):
         from .training_rhythm import proposal,active
-        return {'preferences':{**links.preferences(store,uid),'rhythm':active(store,uid),'synced_at':__import__('time').time()},'weight':links.weight_choices(store,uid),
-                'coach':links.coach_permissions(store,uid),'food_groups':links.FOOD_GROUPS,'help':links.FAQ,
-                'rhythm':{'proposal':proposal(store,uid),'active':active(store,uid)}}
+        snapshot=store.settings_snapshot(uid)
+        rhythm=active(store,uid,snapshot=snapshot)
+        return {'preferences':{**links.preferences(store,uid),'rhythm':rhythm,'synced_at':__import__('time').time()},'weight':links.weight_choices(store,uid,snapshot=snapshot),
+                'coach':links.coach_permissions(store,uid,snapshot=snapshot),'food_groups':links.FOOD_GROUPS,'help':links.FAQ,
+                'rhythm':{'proposal':proposal(store,uid,snapshot=snapshot),'active':rhythm}}
 
     def action(store,uid,body):
         kind=body.get('action')
@@ -41,7 +44,7 @@ def install(app,engine,claims):
     @app.post('/api/v1/me/connections')
     async def update(request:Request):
         uid=claims(request)['sub']
-        try:return action(engine(request).store,uid,await request.json())
+        try:return await run_in_threadpool(action,engine(request).store,uid,await request.json())
         except (ValueError,KeyError,TypeError):raise HTTPException(409,'Данные изменились или действие недоступно. Обновите экран.')
 
     @app.get('/api/v1/me/connections/weight/{operation_id}')
@@ -82,7 +85,7 @@ def install(app,engine,claims):
     @app.post('/internal/v1/connections/sync')
     async def sync(request:Request):
         source,body=await private(request)
-        try:return links.owner_sync(engine(request).store,source,body['people'],body.get('acks',[]))
+        try:return await run_in_threadpool(links.owner_sync,engine(request).store,source,body['people'],body.get('acks',[]))
         except (ValueError,KeyError,TypeError):raise HTTPException(409,'Source sync rejected')
 
     @app.post('/internal/v1/connections/account')
@@ -90,35 +93,35 @@ def install(app,engine,claims):
         _,body=await private(request)
         try:
             uid=subject(body['user_id'])
-            if body.get('action'):return action(engine(request).store,uid,body)
-            return read(engine(request).store,uid)
+            if body.get('action'):return await run_in_threadpool(action,engine(request).store,uid,body)
+            return await run_in_threadpool(read,engine(request).store,uid)
         except (ValueError,KeyError,TypeError):raise HTTPException(409,'Account action rejected')
 
     @app.post('/internal/v1/connections/weekly')
     async def private_weekly(request:Request):
         _,body=await private(request)
-        try:return links.weekly_overview(engine(request).store,subject(body['user_id']))
+        try:return await run_in_threadpool(links.weekly_overview,engine(request).store,subject(body['user_id']))
         except (ValueError,KeyError,TypeError):raise HTTPException(422,'Invalid identity')
 
     @app.post('/internal/v1/connections/changes')
     async def private_changes(request:Request):
         _,body=await private(request)
         from .connection_changes import recent
-        try:return recent(engine(request).store,subject(body['user_id']))
+        try:return await run_in_threadpool(recent,engine(request).store,subject(body['user_id']))
         except (ValueError,KeyError,TypeError):raise HTTPException(422,'Invalid identity')
 
     @app.post('/internal/v1/connections/weekly-plan')
     async def private_weekly_plan(request:Request):
         _,body=await private(request)
         from .weekly_plan import review
-        try:return review(engine(request).store,subject(body['user_id']))
+        try:return await run_in_threadpool(review,engine(request).store,subject(body['user_id']))
         except (ValueError,KeyError,TypeError):raise HTTPException(422,'Invalid identity')
 
     @app.post('/internal/v1/connections/coach')
     async def private_coach(request:Request):
         source,body=await private(request)
         if source!='gym':raise HTTPException(403,'Gym coach only')
-        try:return links.coach_nutrition(engine(request).store,subject(body['coach_id']),subject(body['trainee_id']),body.get('day'))
+        try:return await run_in_threadpool(links.coach_nutrition,engine(request).store,subject(body['coach_id']),subject(body['trainee_id']),body.get('day'))
         except PermissionError as error:raise HTTPException(403,str(error))
         except (ValueError,KeyError,TypeError):raise HTTPException(422,'Invalid identity')
 
@@ -127,5 +130,5 @@ def install(app,engine,claims):
         source,body=await private(request)
         if source!='supply':raise HTTPException(403,'Supply reminders only')
         from .meal_anchors import events
-        try:return events(engine(request).store,body['people'])
+        try:return await run_in_threadpool(events,engine(request).store,body['people'])
         except (ValueError,KeyError,TypeError):raise HTTPException(422,'Invalid identities')

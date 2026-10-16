@@ -8,10 +8,11 @@ def parsed(value):
     return datetime.fromisoformat(value.replace('Z','+00:00'))
 
 
-def enrich_workouts(entities, now):
+def enrich_workouts(entities, now, *, selected_ids=None):
     workouts=[e for e in entities if e['source']=='gym' and e['entity_id'].startswith('workout:')]
+    selected=workouts if selected_ids is None else [e for e in workouts if e['entity_id'] in selected_ids]
     # Birth year gives an age interval; reject boundary cases rather than guessing.
-    for item in workouts:
+    for item in selected:
         p=item['payload']; completed=parsed(p['completed_at'])
         candidates=[e for e in workouts if e['entity_id']!=item['entity_id']
                     and completed-timedelta(days=90)<=parsed(e['payload']['completed_at'])<completed
@@ -32,7 +33,7 @@ def enrich_workouts(entities, now):
                 {**resolved['provenance'].get('age_interval_years',resolved['provenance'].get('age_years',{})),'basis':'reported_adult_age_range'}]
         p['energy_estimate']=estimate
         p['energy_kcal_range']=estimate['gross_kcal_range'] if estimate else None
-    return workouts
+    return selected
 
 
 def native_hints(data, entities, now, day):
@@ -59,9 +60,9 @@ def native_hints(data, entities, now, day):
         if source('food') and seven.get('logged_days',0)>=3:
             means=seven.get('averages_on_logged_days',{})
             if targets.get('protein') and means.get('protein') is not None and means['protein']<targets['protein']*.8:
-                message+=f" Записанный белок: {means['protein']:g} г/день при вашей цели {targets['protein']:g} г."
+                message+=f" За последнюю неделю записано дней — {seven['logged_days']}. Белок в среднем по этим дням — {means['protein']:g} г/день при вашей цели {targets['protein']:g} г."
             elif targets.get('kcal') and means.get('kcal') is not None and means['kcal']<targets['kcal']*.8:
-                message+=f" В записанных днях: {means['kcal']:g} ккал при вашей цели {targets['kcal']:g} ккал."
+                message+=f" За последнюю неделю записано дней — {seven['logged_days']}. В среднем по этим дням: {means['kcal']:g} ккал при вашей цели {targets['kcal']:g} ккал."
         estimates=[w['energy_estimate'] for w in today if w.get('energy_estimate')]
         if len(estimates)==len(today):
             lo=sum(e['net_above_rest_kcal_range'][0] for e in estimates); hi=sum(e['net_above_rest_kcal_range'][1] for e in estimates)
@@ -75,7 +76,7 @@ def native_hints(data, entities, now, day):
     training=[e for e in entities if e['source']=='gym' and e['entity_id'].startswith('workout:')
               and now-timedelta(days=14)<=parsed(e['payload']['completed_at'])<=now] if source('gym') else []
     if low_protein:
-        message=f"За {seven['logged_days']} записанных дней белок — {protein:g} г/день при вашей цели {goal:g} г."
+        message=f"За последнюю неделю записано дней — {seven['logged_days']}. Белок в среднем по этим дням — {protein:g} г/день при вашей цели {goal:g} г."
         if len(training)>=3: message+=f" Тренировок за 14 дней — {len(training)}."
         message+=' Проверьте полноту дневника и цель.'
         hints.append({**base,'key':'logged_protein.v2','targets':['supply','gym']+(['food'] if len(training)>=3 else []),'priority':20,'title':'Белок в вашем журнале',

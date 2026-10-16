@@ -28,3 +28,10 @@ Subscription screen and camera pipeline: read [docs/SUBSCRIPTIONS_AND_FOOD_PHOTO
 ## Selected native connections
 
 Read [docs/SELECTED_FEATURES.md](docs/SELECTED_FEATURES.md) before changing shared profile commands, source-owned caches, reminders, day closure, food atlas/overlap, rhythm, timezone or coach permissions. Shared product_links/ai_cache/day_goal/food_sources/timezone_history are canonical in Core and mirrored together. Trainer aggregate nutrition is a narrow explicit consent exception; native trainer role/link alone never grants it or cross-product AI delegation. Keep source ownership, history/CAS/idempotence, no-replay rest, protocol2 and normal FF main4.
+
+
+## Quality program — 2026-10-16
+
+Read [docs/QUALITY_PROGRAM.md](docs/QUALITY_PROGRAM.md) before storage, access, AI, native UI or deployment changes. Preserve the request-owned context projection, source-owned doses, read-only GET behavior, durable AI attempts and explicit native readiness. Install declared requirements/constraints into a fresh runtime; retain the old runtime for rollback. Match the change to meaningful tests and record exact source/evidence; no extra consumers or real paid tests.
+
+Critical launch mirrors: `shared/bootstrap.v1.js` is distributed identically into Gym/Supply `webapp/assets/progressor-bootstrap.v1.js` and Food `static/webapp/assets/progressor-bootstrap.v1.js`. Update all copies and test native Core outages, SDK proof changes, storage failure, cross-navigation and foreign-origin headers. The complete UI remains here. `settings_snapshot` serves weight/coach/rhythm settings; do not replace full meal reads needed by expressly consented trainer top-5.

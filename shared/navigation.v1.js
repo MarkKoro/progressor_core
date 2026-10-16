@@ -7,6 +7,7 @@
   if (!routes[source]) return;
   const storageKey = 'progressor.launch.v1';
   const rawFetch = window.fetch.bind(window);
+  const localBridge=window.Progressor?._launchBridge?.source===source?window.Progressor._launchBridge:null;
   const readStorage = () => { try { return JSON.parse(sessionStorage.getItem(storageKey) || '{}'); } catch (_) { return {}; } };
   const saveStorage = () => { try { sessionStorage.setItem(storageKey, JSON.stringify(saved)); } catch (_) {} };
   const fromUrl = () => {
@@ -17,16 +18,18 @@
     }
     return '';
   };
-  let saved = readStorage();
+  let saved = localBridge ? localBridge.getState() : readStorage();
   const launched = fromUrl() || window.Telegram?.WebApp?.initData || '';
-  if (launched && launched !== saved.launchData) {
+  if (!localBridge && launched && launched !== saved.launchData) {
     saved = {source, launchData: launched};
     saveStorage();
   }
-  const sessionValid = () => saved.session?.assertions && saved.session.expires_at > Date.now() / 1000 + 5;
+  const sessionValid = () => localBridge ? localBridge.sessionValid() : saved.session?.assertions && saved.session.expires_at > Date.now() / 1000 + 5;
+  const canNavigate = () => !localBridge || localBridge.canNavigate();
   let availableDomains = saved.session?.enabled_domains || [];
   let renewing;
   async function bootstrap(force = false) {
+    if(localBridge){const result=await localBridge.bootstrap(force);saved=localBridge.getState();availableDomains=saved.session?.enabled_domains||[];return result;}
     if (!force && sessionValid()) return saved.session;
     if (renewing) return renewing;
     renewing = (async () => {
@@ -48,8 +51,9 @@
     try { return await renewing; } finally { renewing = null; }
   }
   const ready = bootstrap();
-  window.Progressor = {launchData: saved.launchData || '', ready, renew: bootstrap};
-  window.fetch = async (input, options = {}) => {
+  if(!localBridge){
+   window.Progressor = {launchData: saved.launchData || '', ready, renew: bootstrap};
+   window.fetch = async (input, options = {}) => {
     const url = new URL(input instanceof Request ? input.url : String(input), location.href);
     const audience = url.origin === location.origin && url.pathname.startsWith(apiPrefixes[source]) ? source : url.origin === location.origin && url.pathname.startsWith('/progressor/api/v1/me/') ? 'core' : null;
     if (!audience) return rawFetch(input, options);
@@ -59,7 +63,8 @@
     new Headers(options.headers || {}).forEach((value, key) => headers.set(key, value));
     headers.set('X-Progressor-Auth', session.assertions[audience]);
     return rawFetch(input, {...options, headers});
-  };
+   };
+  }
 
   function element(tag, text, parent) {
     const node = document.createElement(tag);
@@ -149,6 +154,14 @@
     });return button;
   }
   function planRow(parent,label) {const row=element('section',undefined,parent);row.className='progressor-plan';element('strong',label,row);const buttons=element('div',undefined,row);buttons.className='progressor-payment-pair';return {row,buttons};}
+  function* planContainers(parent,plans){
+    const primary=new Set(['m1','1m','m6','6m','m12','12m','y1']);
+    const regular=plans.filter(p=>p.id!=='align');
+    if(!regular.some(p=>primary.has(p.id)))for(const p of regular.slice(0,3))primary.add(p.id);
+    for(const plan of plans)if(primary.has(plan.id)||plan.id==='align')yield {plan,parent};
+    const extra=regular.filter(p=>!primary.has(p.id));
+    if(extra.length){const more=element('details',undefined,parent);more.className='progressor-other-periods';const summary=element('summary','Другие сроки',more);summary.style.cssText='min-height:44px;display:flex;align-items:center;cursor:pointer';for(const plan of extra)yield {plan,parent:more};}
+  }
   async function selectProduct(id) {
     if(purchaseBusy)return;const revision=++purchaseOptionsRevision;selectedProduct=id;renderProducts();
     const box=subscriptionBox.querySelector('[data-purchase-options]');box.replaceChildren();
@@ -158,13 +171,13 @@
     element('p','Эта покупка открывает только '+productNames[id]+'. Для трёх продуктов выберите «Все вместе».',box);
     if(id!==source){
       const button=element('button','Выбрать тариф '+productNames[id],box);button.type='button';button.className='progressor-pay';
-      button.onclick=async()=>{if(await bootstrap(true)&&sessionValid()&&availableDomains.includes(id))location.assign(routes[id]+'?progressor_subscription=1');else showPaymentState(box,'Переход временно недоступен. Откройте '+productNames[id]+' из его бота.');};return;
+      button.onclick=async()=>{if(await bootstrap(true)&&sessionValid()&&canNavigate()&&availableDomains.includes(id))location.assign(routes[id]+'?progressor_subscription=1');else showPaymentState(box,'Переход временно недоступен. Откройте '+productNames[id]+' из его бота.');};return;
     }
     const hook=window.ProgressorDomain;
     if(!hook?.subscriptionPlans||!hook?.purchaseSubscription){showPaymentState(box,'Тарифы загружаются. Повторите выбор через несколько секунд.');return;}
     try{
       const plans=await hook.subscriptionPlans();if(revision!==purchaseOptionsRevision||!box.isConnected)return;
-      for(const p of plans){const {buttons}=planRow(box,p.label);
+      for(const {plan:p,parent} of planContainers(box,plans)){const {buttons}=planRow(parent,p.label);
         if(p.RUB)paymentButton(buttons,money(p.RUB,'RUB'),'RUB',p.id,async button=>{subscriptionBox.closest('#progressor-context').hidden=true;await hook.purchaseSubscription(p.id,'RUB',button);});
         if(p.XTR)paymentButton(buttons,money(p.XTR,'XTR'),'XTR',p.id,async button=>{subscriptionBox.closest('#progressor-context').hidden=true;await hook.purchaseSubscription(p.id,'XTR',button);});
       }if(!plans.length)showPaymentState(box,'Тарифы сейчас недоступны. Попробуйте позже.');
@@ -185,8 +198,8 @@
         state.textContent='Есть неоплаченный счёт. Для другого срока или способа оплаты сначала отмените его. Если деньги списаны, дождитесь подтверждения.';
         if(!catalog.pending_order.checkout_id&&!catalog.pending_order.provider_id){const cancel=element('button','Отменить неоплаченный счёт',box);cancel.type='button';cancel.className='progressor-pay';cancel.onclick=async()=>{cancel.disabled=true;try{const r=await fetch('/progressor/api/v1/me/bundle/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:catalog.pending_order.id})});if(!r.ok)throw new Error();await selectProduct('bundle');}catch(_){state.textContent='Платёж уже проверяется. Дождитесь подтверждения; повторная оплата не нужна.';cancel.disabled=false;}};}
       }
-      for(const plan of catalog.plans){
-        const {row,buttons}=planRow(box,plan.label);
+      for(const {plan,parent} of planContainers(box,catalog.plans)){
+        const {row,buttons}=planRow(parent,plan.label);
         if(plan.prices.XTR.already_covered&&plan.prices.RUB.already_covered){element('p','Все три продукта уже доступны на этот период. Доплачивать не нужно.',row);continue;}
         const credit=Object.entries(plan.prices).filter(([,p])=>p.credit_amount).map(([c,p])=>money(p.credit_amount,c));
         if(credit.length)element('small','Зачёт действующих оплаченных дней: '+credit.join(' / ')+'. Ниже — итоговая доплата.',row);
@@ -223,12 +236,12 @@
       body[data-progressor-domain="gym"] .app-header{top:var(--progressor-bar-height)}
       body[data-progressor-domain="supply"] #app{height:calc(100% - var(--progressor-bar-height));margin-top:var(--progressor-bar-height)}
       #progressor-shell{position:fixed;top:0;left:0;right:0;z-index:24;isolation:isolate;color:#f1f5f9;font:13px system-ui;background:#13213d;border-bottom:1px solid var(--border,#46516b);padding:calc(2px + env(safe-area-inset-top,0px)) 8px 2px;}
-      #progressor-shell nav{display:grid;grid-template-columns:1fr 1fr 1fr 76px;gap:4px;max-width:900px;margin:auto;}
+      #progressor-shell nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;max-width:900px;margin:auto;}
       #progressor-shell *{font-family:inherit;box-sizing:border-box}
       #progressor-shell{box-sizing:border-box;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
       #progressor-shell a,#progressor-shell button{display:flex;align-items:center;justify-content:center;min-height:48px;border:0;border-radius:10px;color:inherit;background:transparent;text-decoration:none;cursor:pointer;font:600 12px system-ui;}
       #progressor-shell a[aria-current="page"]{background:#2563eb;color:white}
-      #progressor-shell nav a,#progressor-shell nav button{min-height:44px;border-radius:8px}
+      #progressor-shell nav a,#progressor-shell nav button{min-height:44px;min-width:0;border-radius:8px;padding:4px;white-space:normal;overflow-wrap:anywhere;text-align:center;line-height:1.25}
       #progressor-shell a[aria-disabled="true"]{opacity:.55}
       #progressor-context{position:absolute;top:100%;left:8px;right:8px;max-width:880px;margin:auto;background:#13213d;border:1px solid var(--border,#46516b);border-radius:0 0 14px 14px;padding:14px;box-shadow:0 10px 24px #0004;max-height:65vh;overflow:auto;overscroll-behavior:contain;line-height:1.5}
       #progressor-context[hidden]{display:none}
@@ -253,7 +266,7 @@
       #progressor-subscriptions small{font-size:12px;line-height:1.45;display:block}
       .progressor-subscription-heading{display:flex;align-items:center;justify-content:space-between;font-size:17px}
       #progressor-shell .progressor-products{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-      #progressor-shell .progressor-product{position:relative;display:flex;flex-direction:column;justify-content:flex-start;gap:8px;padding:12px 7px;border:1px solid var(--border,#46516b);background:var(--card,#13213d);min-width:0;text-align:center;white-space:normal;overflow-wrap:anywhere;font-size:13px}
+      #progressor-shell .progressor-product{position:relative;display:flex;flex-direction:column;justify-content:flex-start;gap:8px;padding:12px 7px;border:1px solid #64748b;background:#1e3152;color:#f1f5f9;min-width:0;text-align:center;white-space:normal;overflow-wrap:anywhere;font-size:13px}
       #progressor-shell .progressor-product[aria-pressed=true]{border:2px solid #60a5fa;padding:11px 6px}
       .progressor-product svg{width:32px;height:32px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
       .progressor-access-badge{position:absolute;right:5px;top:3px;font-size:18px}
@@ -286,18 +299,18 @@
         if (domain === source) { event.preventDefault(); return; }
         event.preventDefault();
         await bootstrap(true);
-        if (sessionValid() && availableDomains.includes(domain)) location.assign(routes[domain]);
+        if (sessionValid() && canNavigate() && availableDomains.includes(domain)) location.assign(routes[domain]);
         else { panel.hidden = false; status.textContent = 'Переход временно недоступен. Текущий раздел продолжает работать; попробуйте позже.'; }
       });
     }
     const toggle = element('button', 'Подписки', nav);
     toggle.type = 'button'; toggle.setAttribute('aria-label', 'Мои подписки и общий контекст');
     toggle.setAttribute('aria-expanded', 'false'); toggle.setAttribute('aria-controls', panel.id);
-    toggle.addEventListener('click', () => { panel.hidden = !panel.hidden; toggle.setAttribute('aria-expanded', String(!panel.hidden)); if (!panel.hidden) {loadContext();openBundle(panel);} });
+    toggle.addEventListener('click', () => { panel.hidden = !panel.hidden; toggle.setAttribute('aria-expanded', String(!panel.hidden)); if (!panel.hidden) {document.dispatchEvent(new Event('progressor:overlay-open'));loadContext();openBundle(panel);} });
     const bundle = element('button', 'Progressor · подписка на 3 продукта', panel);
     bundle.type = 'button'; bundle.id = 'progressor-bundle-button';
     bundle.addEventListener('click', () => openBundle(panel));
-    window.Progressor.openBundle = () => { panel.hidden = false; toggle.setAttribute('aria-expanded','true'); return openBundle(panel); };
+    window.Progressor.openBundle = () => { panel.hidden = false; toggle.setAttribute('aria-expanded','true'); document.dispatchEvent(new Event('progressor:overlay-open')); return openBundle(panel); };
     window.Progressor.openSubscriptions = window.Progressor.openBundle;
     window.Progressor.openProductSubscriptions = async id => {panel.hidden=false;toggle.setAttribute('aria-expanded','true');ensureSubscriptions(panel);const revision=++purchaseOptionsRevision;await loadSubscriptions(panel);if(revision===purchaseOptionsRevision)await selectProduct(id);};
     document.body.prepend(shell);
@@ -338,7 +351,7 @@
       if (action.kind==='bundle') return window.Progressor.openBundle();
       const handled=await window.ProgressorDomain?.perform?.(action);
       if (handled) return;
-      if ((action.kind==='open_food' || action.kind==='food_log') && await bootstrap(true) && availableDomains.includes('food')) location.assign(routes.food);
+      if ((action.kind==='open_food' || action.kind==='food_log') && await bootstrap(true) && canNavigate() && availableDomains.includes('food')) location.assign(routes.food);
     }
     function renderInline() {
       const host=window.ProgressorDomain?.hintHost?.();
@@ -400,7 +413,7 @@
         if (context.activity) element('p', activityText(context.activity), content);
         if (context.nutrition) element('p', nutritionText(context), content);
         if (context.supply?.status === 'ok') element('p', `Supply: активных добавок — ${context.supply.active_supplement_count}, отмеченных приёмов — ${context.supply.recorded_intake_count}, доступных отчётов анализов — ${context.supply.lab_report_count}.`, content);
-        for (const recommendation of context.recommendations || []) { element('strong', recommendation.title, content); element('p', recommendation.message, content); element('p', recommendation.uncertainty, content); const link = element('a', 'Проверить журнал Food', content); link.href = routes.food; link.addEventListener('click', async e => { e.preventDefault(); if (await bootstrap()) location.assign(routes.food); }); }
+        for (const recommendation of context.recommendations || []) { element('strong', recommendation.title, content); element('p', recommendation.message, content); element('p', recommendation.uncertainty, content); const link = element('a', 'Проверить журнал Food', content); link.href = routes.food; link.addEventListener('click', async e => { e.preventDefault(); if (await bootstrap() && canNavigate()) location.assign(routes.food); }); }
         const nutrients = context.nutrition?.history?.['7']?.nutrients || {};
         const codes = Object.keys(nutrients);
         if (codes.length) { const details = element('details', undefined, content); element('summary', 'Нутриенты из записей Food', details); for (const code of codes) { const n = nutrients[code]; element('p', `${n.name || code}: ${n.average_on_observed_days} ${n.unit === 'ug' ? 'мкг' : n.unit === 'mg' ? 'мг' : 'г'} по ${n.observed_days} дням с данными; ${n.observed_meals} из ${n.logged_meals} приёмов пищи. Для порций с оценкой известен состав ${n.observed_components} из ${n.assessed_components} продуктов. Значения приблизительные, пропуски не считаются нулём.`, details); } }
@@ -414,7 +427,7 @@
         content.querySelectorAll('details').forEach((d,i)=>{d.open=!!expanded[i];});
         if (context.memberships.length) element('small', 'Источники: ' + context.memberships.map(s => ({gym:'Gym',food:'Food',supply:'Supply'}[s])).join(', ') + '. Изменения обычно появляются в течение минуты; выводы учитывают полноту записей.', content);
       } catch (_) { status.textContent = 'Общий контекст временно недоступен. Текущий раздел продолжает работать.'; lastContext=null; renderInline();if(initialContextRetries++<2)setTimeout(loadContext,2500); }
-      finally { clearTimeout(timeout); loading = false; nav.querySelectorAll('a').forEach(a => a.setAttribute('aria-disabled', String(a.dataset.domain !== source && (!sessionValid() || !availableDomains.includes(a.dataset.domain))))); }
+      finally { clearTimeout(timeout); loading = false; nav.querySelectorAll('a').forEach(a => a.setAttribute('aria-disabled', String(a.dataset.domain !== source && (!sessionValid() || !canNavigate() || !availableDomains.includes(a.dataset.domain))))); }
     }
     await loadContext();
     await loadSubscriptions(panel);

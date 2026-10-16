@@ -83,9 +83,9 @@ def save_preferences(store,user_id,patch,expected_revision):
                    (uid,expected_revision+1,canonical(body),time.time()))
     return preferences(store,uid)
 
-def permitted_entities(store,user_id,now=None):
+def permitted_entities(store,user_id,now=None,*,snapshot=None):
     now=now or datetime.now(timezone.utc)
-    entities,members,state=store.data(subject(user_id))
+    entities,members,state=snapshot if snapshot is not None else store.data(subject(user_id))
     access=entitlements(store,subject(user_id),now,entities)
     policy=preferences(store,user_id)
     allowed={s for s in access['accessible_domains'] if policy['sources'][s]
@@ -93,15 +93,16 @@ def permitted_entities(store,user_id,now=None):
         and state.get(s,{}).get('status')=='ok' and time.time()-(state[s].get('last_success') or 0)<120}
     return [e for e in entities if e['source'] in allowed],members,access
 
-def weight_choices(store,user_id):
-    entities,members,access=permitted_entities(store,user_id)
+def weight_choices(store,user_id,*,snapshot=None):
+    entities,members,access=permitted_entities(store,user_id,snapshot=snapshot)
     latest={};now=datetime.now(timezone.utc)
     for entity in entities:
         p=entity['payload'];value=None
         if entity['source']=='gym' and entity['entity_id'].startswith('weight:'):value=p.get('value')
         elif p.get('profile_kind') in ('reported_nutrition','reported_health'):value=(p.get('reported_profile') or {}).get('weight_kg')
+        if type(value) not in (int,float) or not math.isfinite(value) or not 30<=value<=350:continue
         stamp=datetime.fromisoformat(entity['occurred_at'].replace('Z','+00:00'))
-        if type(value) not in (int,float) or not math.isfinite(value) or not 30<=value<=350 or not now-timedelta(days=90)<=stamp<=now:continue
+        if not now-timedelta(days=90)<=stamp<=now:continue
         old=latest.get(entity['source'])
         if old and (old['observed_at'],old['event_id'])>=(entity['occurred_at'],entity['event_id']):continue
         latest[entity['source']]={'source':entity['source'],'value':float(value),'unit':'kg',
@@ -170,14 +171,14 @@ def owner_sync(store,source,people,acks):
         ready.append({**command,'body':json.loads(command['body'])})
     return {'settings':settings,'commands':ready}
 
-def coach_links(store,trainee_id):
-    entities,_,state=store.data(subject(trainee_id))
+def coach_links(store,trainee_id,*,snapshot=None):
+    entities,_,state=snapshot if snapshot is not None else store.data(subject(trainee_id))
     if state.get('gym',{}).get('status')!='ok' or time.time()-(state.get('gym',{}).get('last_success') or 0)>=120:return []
     return [e for e in entities if e['source']=='gym' and e['payload'].get('profile_kind')=='coach_link'
             and e['payload'].get('status')=='accepted' and e['payload'].get('coach_enabled') is True]
 
-def coach_permissions(store,trainee_id):
-    links=coach_links(store,trainee_id)
+def coach_permissions(store,trainee_id,*,snapshot=None):
+    links=coach_links(store,trainee_id,snapshot=snapshot)
     with store.connection() as db:
         rows={r['coach_id']:dict(r) for r in db.execute('SELECT * FROM coach_nutrition_permissions WHERE trainee_id=?',(subject(trainee_id),))}
     result=[]
@@ -239,17 +240,24 @@ FAQ = [
  {'id':'payments','title':'Что будет после окончания одной подписки?','text':'История сохраняется; оплаченные продукты продолжают работать. Связь с завершившимся доступом прекращается. Общую подписку или недостающий продукт можно выбрать в экране подписок; пробные дни дают доступ, но не денежный зачёт.'},
 ]
 
-def weekly_overview(store,user_id):
+def weekly_overview(store,user_id,now=None):
     from .context import build_context
-    data=build_context(store,subject(user_id))
+    now=now or datetime.now(timezone.utc)
+    data=build_context(store,subject(user_id),now=now)
     nutrition=data.get('nutrition') or {};activity=data.get('activity') or {}
     entities,_,_=permitted_entities(store,user_id)
-    start=datetime.now(timezone.utc)-timedelta(days=7)
+    start=now-timedelta(days=7)
     workouts=[e for e in entities if e['source']=='gym' and e['entity_id'].startswith('workout:')
-              and start<=datetime.fromisoformat(e['payload']['completed_at'].replace('Z','+00:00'))<=datetime.now(timezone.utc)]
+              and start<=datetime.fromisoformat(e['payload']['completed_at'].replace('Z','+00:00'))<=now]
     supply=data.get('supply')
+    intake_count=None
+    if supply:
+        # The public context carries only 90 recent rows. A weekly aggregate
+        # must count the complete permitted window, including busy schedules.
+        with store.connection() as db:
+            intake_count=db.execute("SELECT count(*) FROM entities WHERE user_id=? AND source='supply' AND deleted=0 AND entity_id GLOB 'intake:*' AND json_extract(payload,'$.status')='taken' AND json_extract(payload,'$.source_local_date')>=?",(subject(user_id),start.date().isoformat())).fetchone()[0]
     return {'nutrition':(nutrition.get('history') or {}).get('7'),'workouts':{'recorded_sessions':len(workouts),
         'completed_sessions':sum(e['payload'].get('session_complete',True) for e in workouts),
         'working_sets':sum(e['payload'].get('strength_sets',0) for e in workouts)} if 'gym' in data['memberships'] else None,
-        'supply':{'active_supplements':supply['active_supplement_count'],'recorded_intakes':sum(p.get('status')=='taken' and p.get('source_local_date','')>=start.date().isoformat() for p in supply['recent_intakes'])} if supply else None,
+        'supply':{'active_supplements':supply['active_supplement_count'],'recorded_intakes':intake_count} if supply else None,
         'sources':data['sources'],'coverage':'Только сохранённые записи. Отсутствие отметки не означает отсутствие еды, тренировки или приёма.'}

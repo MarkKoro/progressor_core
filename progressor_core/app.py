@@ -5,13 +5,14 @@ import logging
 import os
 import time
 import uuid
-from collections import Counter, defaultdict, deque
+from collections import Counter
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from starlette.concurrency import run_in_threadpool
 from .adapters import snapshot
 from .auth import AUDIENCES, sign_assertion, telegram_user, verify_assertion
 from .context import build_context
@@ -22,6 +23,7 @@ from .billing import Billing
 from .native_pricing import NativePricing
 from .subscription_notices import SubscriptionNotices
 from .payments import install_routes, reconcile_pending
+from .rate_limit import SlidingWindows, client_address
 
 log = logging.getLogger('progressor')
 if not log.handlers:
@@ -123,7 +125,7 @@ def create_app(config=None):
                 except asyncio.CancelledError: pass
 
     app = FastAPI(title='Progressor Core', lifespan=lifespan, docs_url=None, redoc_url=None)
-    rate = defaultdict(deque)
+    rate = SlidingWindows()
 
     @app.middleware('http')
     async def observe(request, call_next):
@@ -134,12 +136,8 @@ def create_app(config=None):
         if not length.isdecimal() or int(length)>32768: return JSONResponse({'detail':'Body too large'},status_code=413)
         if request.method=='POST' and len(await request.body())>32768: return JSONResponse({'detail':'Body too large'},status_code=413)
         if request.url.path.startswith('/api/v1/website/') or request.url.path=='/api/v1/bundle/yookassa/webhook':
-            address=request.client.host if request.client else 'unknown'
-            if address in ('127.0.0.1','::1'): address=request.headers.get('X-Real-IP',address)
-            bucket=rate['billing:'+address]
-            while bucket and bucket[0]<stamp-60: bucket.popleft()
-            if len(bucket)>=120: return JSONResponse({'detail':'Retry later'},status_code=429)
-            bucket.append(stamp)
+            if not rate.allow('billing:'+client_address(request),120,now=stamp):
+                return JSONResponse({'detail':'Retry later'},status_code=429,headers={'Retry-After':'60'})
         try:
             response = await call_next(request)
         except Exception as exc:
@@ -193,19 +191,8 @@ def create_app(config=None):
         if int(length) > 20000:
             raise HTTPException(413, 'Launch proof too large')
         # IPs stay in memory; there are no launch/user/token values in logs.
-        address = request.client.host if request.client else 'unknown'
-        # The loopback reverse proxy overwrites X-Real-IP. Never trust it from a remote peer.
-        if address in ('127.0.0.1','::1'):
-            import ipaddress
-            try: address=str(ipaddress.ip_address(request.headers.get('X-Real-IP',address)))
-            except ValueError: pass
-        stamp = time.monotonic()
-        bucket = rate[address]
-        while bucket and bucket[0] < stamp - 60:
-            bucket.popleft()
-        if len(bucket) >= 60:
-            raise HTTPException(429, 'Retry later')
-        bucket.append(stamp)
+        if not rate.allow('sessions:'+client_address(request),60):
+            raise HTTPException(429, 'Retry later',headers={'Retry-After':'60'})
         try:
             raw_body = await request.body()
             if len(raw_body) > 20000:
@@ -219,7 +206,7 @@ def create_app(config=None):
             engine(request).metrics['auth_errors'] += 1
             raise HTTPException(401, 'Invalid or expired Telegram launch')
         assertions = {aud: sign_assertion(user, auth_date, aud, cfg.signing_key) for aud in AUDIENCES}
-        access=entitlements(engine(request).store,str(user['id']))
+        access=await run_in_threadpool(entitlements,engine(request).store,str(user['id']))
         return {'schema_version': 1, 'user': user, 'assertions': assertions, 'expires_at': min(int(time.time()) + 900, auth_date + 86400), 'enabled_domains': cfg.enabled_domains,'access':access}
 
     @app.get('/api/v1/me/context')
@@ -250,9 +237,9 @@ def create_app(config=None):
         except (ValueError,KeyError,TypeError): raise HTTPException(422,'Invalid target')
         if target not in SOURCES or target not in engine(request).config.enabled_domains:
             raise HTTPException(422,'Invalid target')
-        if not entitlements(engine(request).store,identity['sub'])['domains'][target]:
+        if not (await run_in_threadpool(entitlements,engine(request).store,identity['sub']))['domains'][target]:
             raise HTTPException(403,'Subscription required')
-        return {'dismissed_until':engine(request).store.dismiss_hints(identity['sub'],target)}
+        return {'dismissed_until':await run_in_threadpool(engine(request).store.dismiss_hints,identity['sub'],target)}
 
     @app.post('/api/v1/me/offers/dismiss')
     async def dismiss_offer(request: Request):
@@ -263,7 +250,7 @@ def create_app(config=None):
         except (ValueError,KeyError,TypeError): raise HTTPException(422,'Invalid target')
         if target not in SOURCES or target not in engine(request).config.enabled_domains:
             raise HTTPException(422,'Invalid target')
-        return {'dismissed_until':engine(request).store.dismiss_offers(identity['sub'],target)}
+        return {'dismissed_until':await run_in_threadpool(engine(request).store.dismiss_offers,identity['sub'],target)}
 
     @app.post('/api/v1/me/hints/seen')
     async def hint_seen(request: Request):
@@ -272,10 +259,10 @@ def create_app(config=None):
         try:
             body=json.loads(raw);target=body['target'];key=body['delivery_key']
             if target not in SOURCES or target not in engine(request).config.enabled_domains: raise ValueError('target')
-            current=build_context(engine(request).store,identity['sub'],target=target,enabled_sources=engine(request).config.enabled_domains)
+            current=await run_in_threadpool(build_context,engine(request).store,identity['sub'],target=target,enabled_sources=engine(request).config.enabled_domains)
             if not any(h.get('delivery_key')==key and target in h['targets'] for h in current['hints']): raise ValueError('hint')
         except (KeyError,TypeError,ValueError): raise HTTPException(422,'Invalid hint')
-        engine(request).store.mark_hint_seen(identity['sub'],target,key)
+        await run_in_threadpool(engine(request).store.mark_hint_seen,identity['sub'],target,key)
         return {'seen':True}
 
     @app.post('/api/v1/events')
@@ -292,12 +279,14 @@ def create_app(config=None):
             event = json.loads(raw)
             if event.get('source') != source:
                 raise ValueError('producer_source_mismatch')
-            status = engine(request).store.accept(event)
+            status = await run_in_threadpool(engine(request).store.accept,event)
             engine(request).metrics['events_' + status] += 1
             return {'status': status, 'correlation_id': event['correlation_id']}
         except (ValueError, KeyError, TypeError) as exc:
-            with engine(request).store.connection() as db:
-                db.execute('INSERT INTO dead_letters(source,reason,payload_hash,received_at) VALUES(?,?,?,?)', (source, type(exc).__name__, digest(raw.hex()), now_utc()))
+            def retain_rejected_event(reason):
+                with engine(request).store.connection() as db:
+                    db.execute('INSERT INTO dead_letters(source,reason,payload_hash,received_at) VALUES(?,?,?,?)', (source, reason, digest(raw.hex()), now_utc()))
+            await run_in_threadpool(retain_rejected_event,type(exc).__name__)
             engine(request).metrics['event_errors'] += 1
             raise HTTPException(409 if str(exc).endswith('conflict') else 422, 'Event rejected')
 

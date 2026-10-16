@@ -9,9 +9,12 @@ from .profiles import resolve_profile
 from .connections import preferences
 
 
-def build_context(store, user_id, now=None, requested_day=None, target=None, enabled_sources=None):
+def build_context(store, user_id, now=None, requested_day=None, target=None, enabled_sources=None, *, _request_data=None):
     now = now or datetime.now(timezone.utc)
-    entities, memberships, state = store.data(user_id)
+    food_zone = zone('Europe/Moscow')
+    day = date.fromisoformat(requested_day) if requested_day else now.astimezone(food_zone).date()
+    request_snapshot, summary_counts = _request_data if _request_data is not None else store.context_snapshot(user_id,workout_day=day.isoformat())
+    entities, memberships, state = request_snapshot
     access=entitlements(store,user_id,now,entities)
     policy=preferences(store,user_id)
     offer=bundle_preview(entities,access,target,now,enabled_sources)
@@ -27,11 +30,12 @@ def build_context(store, user_id, now=None, requested_day=None, target=None, ena
         fresh = observed.get('status') == 'ok' and time.time() - (observed.get('last_success') or 0) < 120
         source_status[source] = {'status': 'ok' if fresh else 'degraded', 'last_success': observed.get('last_success'), 'reason': None if fresh else observed.get('reason') or 'stale_or_missing_source'}
     active = {m['source'] for m in memberships if m['active'] and m['source'] in allowed}
-    food_zone = zone('Europe/Moscow')
-    day = date.fromisoformat(requested_day) if requested_day else now.astimezone(food_zone).date()
     fresh_entities=[e for e in entities if source_status[e['source']]['status']=='ok']
-    enriched=enrich_workouts(fresh_entities,now)
-    workouts = [e for e in enriched if datetime.fromisoformat(e['payload']['completed_at'].replace('Z', '+00:00')).astimezone(food_zone).date() == day]
+    # Keep all history for comparison, but calculate estimates only for the day
+    # being shown. Enriching every old session on each view grew quadratically.
+    today_ids={e['entity_id'] for e in fresh_entities if e['source']=='gym' and e['entity_id'].startswith('workout:')
+               and datetime.fromisoformat(e['payload']['completed_at'].replace('Z','+00:00')).astimezone(food_zone).date()==day}
+    workouts=enrich_workouts(fresh_entities,now,selected_ids=today_ids)
     activity_reason = 'missing_gym_membership' if 'gym' not in active else 'stale_gym_source' if source_status['gym']['status'] != 'ok' else 'workout_recorded' if workouts else 'no_completed_workout_recorded'
     activity = {'date': day.isoformat(), 'day_timezone': 'Europe/Moscow', 'day_basis': 'food_legacy_day', 'reason': activity_reason, 'completed_workout_count': len(workouts) if source_status['gym']['status'] == 'ok' else None, 'workouts': [e['payload'] for e in workouts] if source_status['gym']['status'] == 'ok' else [], 'provenance': [{'source': 'gym', 'event_id': e['event_id'], 'occurred_at': e['payload']['completed_at']} for e in workouts], 'calorie_target_adjustment': None, 'uncertainty': 'Точное время и расход энергии силовой тренировки не записаны. Цель питания автоматически не изменяется.'}
     totals = sorted([e for e in entities if e['source'] == 'food' and e['entity_id'].startswith('daily:')], key=lambda e: e['payload']['source_local_date'])
@@ -60,8 +64,9 @@ def build_context(store, user_id, now=None, requested_day=None, target=None, ena
     if recommendation:
         recommendation = {**recommendation, 'id': rec_id}
     supply_entities = [e for e in entities if e['source'] == 'supply'] if source_status['supply']['status'] == 'ok' else []
-    supply_context={'active_supplements':[e['payload'] for e in supply_entities if e['entity_id'].startswith('supplement:') and e['payload'].get('active')], 'recent_intakes':sorted([e['payload'] for e in supply_entities if e['entity_id'].startswith('intake:')],key=lambda p:p['source_local_date'],reverse=True)[:90], 'lab_reports':[e['payload'] for e in supply_entities if e['entity_id'].startswith('lab:')], 'reported_profile':next((e['payload']['reported_profile'] for e in supply_entities if e['payload'].get('profile_kind')=='reported_health'),None), 'uncertainty':'Дозы в Supply записаны текстом и не складываются с оценками пищи. Анализы сохраняют исходные единицы и статус обработки; Core не устанавливает диагнозы.'}
+    supply_context={'active_supplements':[e['payload'] for e in supply_entities if e['entity_id'].startswith('supplement:') and e['payload'].get('active')], 'recent_intakes':sorted([e['payload'] for e in supply_entities if e['entity_id'].startswith('intake:')],key=lambda p:(p['source_local_date'],p['entity_id']),reverse=True)[:90], 'lab_reports':[e['payload'] for e in supply_entities if e['entity_id'].startswith('lab:')], 'reported_profile':next((e['payload']['reported_profile'] for e in supply_entities if e['payload'].get('profile_kind')=='reported_health'),None), 'uncertainty':'Дозы в Supply записаны текстом и не складываются с оценками пищи. Анализы сохраняют исходные единицы и статус обработки; Core не устанавливает диагнозы.'}
     data={'schema_version': 1, 'generated_at': now.isoformat(), 'user_id': user_id, 'memberships': sorted(active), 'sources': source_status, 'activity': activity, 'nutrition': {'reason': reason, 'day_timezone': 'Europe/Moscow', 'targets': food_target['payload']['targets'] if food_target and source_status['food']['status'] == 'ok' else None, 'history': history if source_status['food']['status'] == 'ok' else None}, 'recommendations': [recommendation] if recommendation else [], 'supply': {**supply_context,'active_supplement_count': sum(bool(e['payload'].get('active')) for e in supply_entities if e['entity_id'].startswith('supplement:')), 'recorded_intake_count': sum(e['payload'].get('status') == 'taken' for e in supply_entities if e['entity_id'].startswith('intake:')), 'lab_report_count': sum(e['entity_id'].startswith('lab:') for e in supply_entities), 'status': source_status['supply']['status']}, 'notification_delivery': 'webapp_only','access':access}
+    data['supply']['recorded_intake_count']=summary_counts['supply_taken_count'] if supply_entities else 0
     # Unauthorized sources are absent rather than displayed as upsell/error/zero-intake hints.
     if 'gym' not in active: data['activity']=None
     if 'food' not in active: data['nutrition']=None; data['recommendations']=[]
@@ -71,7 +76,7 @@ def build_context(store, user_id, now=None, requested_day=None, target=None, ena
     current=next((e for e in totals if e['payload']['source_local_date']==day.isoformat()),None)
     if data.get('nutrition') and data['nutrition'].get('targets'):
         from .training_rhythm import active
-        rhythm=active(store,user_id,now)
+        rhythm=active(store,user_id,now,snapshot=request_snapshot)
         if rhythm and day<datetime.fromtimestamp(rhythm['confirmed_at'],food_zone).date():rhythm=None
         data['nutrition']['rhythm']=rhythm
         if rhythm:
@@ -90,8 +95,8 @@ def build_context(store, user_id, now=None, requested_day=None, target=None, ena
         data['activity']['completed_workout_count']=sum(w['payload'].get('session_complete',True) for w in workouts)
     data['hints']=native_hints(data,fresh_entities,now,day) if policy['hints'] else []
     from .connection_changes import recent,hints
-    data['recent_changes']=recent(store,user_id,now)
-    data['hints']+=hints(store,user_id,target,now) if target else []
+    data['recent_changes']=recent(store,user_id,now,snapshot=request_snapshot)
+    data['hints']+=hints(store,user_id,target,now,snapshot=request_snapshot,changes=data['recent_changes']['items']) if target else []
     data['hints'].sort(key=lambda h:(h['priority'],h['key']))
     for hint in data['hints']:
         hint.setdefault('delivery_key',hint['key']+':'+day.isoformat())

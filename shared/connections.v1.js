@@ -6,10 +6,15 @@
   let dialog,content,notice,opener,current,busy=false;
   const el=(tag,text,parent)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(parent)parent.append(n);return n;};
   async function api(path,body){
-    const r=await fetch('/progressor/api/v1/me/connections'+path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,cache:'no-store'});
-    if(!r.ok){let v;try{v=await r.json();}catch{}throw new Error(v?.detail||'Связь временно недоступна. Попробуйте позже.');}return r.json();
+    let r;
+    try{r=await fetch('/progressor/api/v1/me/connections'+path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,cache:'no-store'});}
+    catch{throw new Error('Не удалось получить подтверждение. Проверьте соединение и повторите действие. Введённый выбор остаётся на экране.');}
+    if(!r.ok){
+      const message=r.status===409?'Данные изменились в другом окне. Ваш выбор остаётся на экране. Обновление данных сбросит несохранённый выбор.':r.status===401?'Сессия закончилась. Заново откройте приложение из бота.':r.status===403?'Доступ к этим данным изменился. Обновите экран.':r.status===422?'Проверьте выбранные параметры и повторите действие.':r.status===429?'Слишком частые запросы. Немного подождите и повторите.':'Не удалось получить подтверждение от сервиса. Повторите действие позже; введённый выбор остаётся на экране.';
+      const error=new Error(message);error.status=r.status;throw error;
+    }return r.json();
   }
-  function button(label,parent,action){const b=el('button',label,parent);b.type='button';b.addEventListener('click',async()=>{if(busy)return;busy=true;b.disabled=true;notice.textContent='';try{await action();}catch(e){notice.textContent=String(e.message||e);}finally{busy=false;b.disabled=false;}});return b;}
+  function button(label,parent,action){const b=el('button',label,parent);b.type='button';b.addEventListener('click',async()=>{if(busy)return;busy=true;b.disabled=true;notice.textContent='';try{await action();}catch(e){notice.textContent=String(e.message||e);if(e.status===409)button('Обновить данные',notice,refresh);}finally{busy=false;b.disabled=false;}});return b;}
   function toggle(label,parent,value){const row=el('label',undefined,parent);row.className='link-toggle';const check=el('input',undefined,row);check.type='checkbox';check.checked=!!value;el('span',label,row);return check;}
   function section(title,parent){const d=el('details',undefined,parent);el('summary',title,d);return d;}
   async function refresh(){current=await api('');render();}
@@ -151,16 +156,27 @@
     if(focus)content.querySelector('[data-link-field="'+CSS.escape(focus)+'"]')?.focus();
   }
   async function open(){
-    opener=document.activeElement;
+    if(!dialog?.open)opener=document.activeElement;
     if(!dialog){
       const style=el('style',`#progressor-connections{box-sizing:border-box;width:min(94vw,620px);max-height:88vh;border:1px solid var(--border,#46516b);border-radius:18px;background:var(--card,#14213d);color:var(--text,#fff);padding:18px;font:15px system-ui}#progressor-connections::backdrop{background:#0009}#progressor-connections button{box-sizing:border-box;min-height:44px;border:1px solid var(--border,#64748b);border-radius:10px;padding:9px 12px;margin:5px 0;background:var(--card,#243657);color:inherit;font:inherit;cursor:pointer}#progressor-connections select{max-width:100%;min-height:44px;margin:8px;border-radius:8px;background:var(--card,#243657);color:inherit;padding:8px}#progressor-connections details{padding:10px 0;border-top:1px solid var(--border,#46516b)}#progressor-connections summary{cursor:pointer;min-height:38px;display:flex;align-items:center;font-weight:600}#progressor-connections .link-toggle{display:flex;align-items:center;gap:10px;min-height:44px;margin:5px 0}#progressor-connections input[type=checkbox]{width:22px;height:22px;flex:none}#progressor-connections small{display:block;line-height:1.5;opacity:.85}#progressor-connections p{line-height:1.5}#progressor-connections :focus-visible{outline:3px solid #60a5fa;outline-offset:2px}`,document.head);
       dialog=el('dialog',undefined,document.body);dialog.id='progressor-connections';dialog.setAttribute('aria-labelledby','progressor-link-title');el('h2','Связь продуктов',dialog).id='progressor-link-title';notice=el('p',undefined,dialog);notice.setAttribute('role','status');content=el('div',undefined,dialog);
       // Host card colors can be translucent; the modal needs an opaque surface.
-      el('style','#progressor-connections{background:#14213d;color:#f1f5f9}#progressor-connections,#progressor-connections *{font-family:system-ui,-apple-system,"Segoe UI",sans-serif!important}#progressor-connections input:not([type=checkbox]){box-sizing:border-box;max-width:100%;min-height:44px;padding:8px;border:1px solid #64748b;border-radius:8px;background:#243657;color:#f1f5f9}',document.head);
+      el('style','#progressor-connections{background:#14213d;color:#f1f5f9}#progressor-connections button,#progressor-connections select{background:#243657;color:#f1f5f9;border-color:#64748b}#progressor-connections,#progressor-connections *{font-family:system-ui,-apple-system,"Segoe UI",sans-serif!important}#progressor-connections input:not([type=checkbox]){box-sizing:border-box;max-width:100%;min-height:44px;padding:8px;border:1px solid #64748b;border-radius:8px;background:#243657;color:#f1f5f9}',document.head);
       button('Закрыть',dialog,async()=>dialog.close());dialog.addEventListener('close',()=>opener?.focus());
+      dialog.addEventListener('keydown',event=>{
+        if(event.key!=='Tab')return;
+        const controls=[...dialog.querySelectorAll('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary,[tabindex="0"]')].filter(n=>n.getClientRects().length&&!n.closest('[hidden]'));
+        const first=controls[0],last=controls[controls.length-1];
+        if(!first){event.preventDefault();dialog.focus();return;}
+        if(event.shiftKey&&(document.activeElement===first||!dialog.contains(document.activeElement))){event.preventDefault();last.focus();}
+        else if(!event.shiftKey&&(document.activeElement===last||!dialog.contains(document.activeElement))){event.preventDefault();first.focus();}
+      });
     }
+    document.dispatchEvent(new Event('progressor:overlay-open'));
     if(!dialog.open)dialog.showModal();notice.textContent='Загружаем ваши настройки…';
-    try{await window.Progressor?.ready;await refresh();notice.textContent='';}catch(e){notice.textContent=e.message;}
+    try{await window.Progressor?.ready;await refresh();notice.textContent='';
+      if(dialog.open)content.querySelector('summary,button,input,select')?.focus();
+    }catch(e){notice.textContent=e.message;}
   }
   window.Progressor=window.Progressor||{};window.Progressor.openConnections=open;
   document.addEventListener('progressor:open-connections',open);
