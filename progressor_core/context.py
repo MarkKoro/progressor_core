@@ -85,6 +85,7 @@ def build_context(store, user_id, now=None, requested_day=None, target=None, ena
             data['nutrition']['target_basis']='user_confirmed_weekly_redistribution'
     if data.get('nutrition') is not None and source_status['food']['status']=='ok':
         data['nutrition']['today']={'date':day.isoformat(),'logged_meal_count':current['payload']['logged_meal_count'] if current else 0,
+            'latest_meal_at':current['payload'].get('latest_meal_at') if current else None,
             'totals':current['payload']['totals'] if current else None,'coverage':'logged_meals_only',
             'day_complete':bool(current and current['payload'].get('day_complete')),
             'remaining_to_personal_goal':{k:round(max(v-current['payload']['totals'][k],0),1) for k,v in data['nutrition']['targets'].items()} if current and data['nutrition']['targets'] else None}
@@ -93,7 +94,9 @@ def build_context(store, user_id, now=None, requested_day=None, target=None, ena
     if data.get('activity') is not None:
         data['activity']['recorded_session_count']=len(workouts)
         data['activity']['completed_workout_count']=sum(w['payload'].get('session_complete',True) for w in workouts)
-    data['hints']=native_hints(data,fresh_entities,now,day) if policy['hints'] else []
+    from .journey import workout_follow_up
+    data['workout_follow_up']=workout_follow_up(data,now)
+    data['hints']=native_hints(data,fresh_entities,now,day,food_preferences=policy) if policy['hints'] else []
     from .connection_changes import recent,hints
     data['recent_changes']=recent(store,user_id,now,snapshot=request_snapshot)
     data['hints']+=hints(store,user_id,target,now,snapshot=request_snapshot,changes=data['recent_changes']['items']) if target else []

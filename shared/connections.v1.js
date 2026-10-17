@@ -3,11 +3,11 @@
   'use strict';
   const source=document.currentScript?.dataset.progressorSource;
   const names={food:'Food',gym:'Gym Diary',supply:'Supply'};
-  let dialog,content,notice,opener,current,busy=false;
+  let dialog,content,notice,opener,current,busy=false,todayReload;
   const el=(tag,text,parent)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(parent)parent.append(n);return n;};
-  async function api(path,body){
+  async function api(path,body,signal){
     let r;
-    try{r=await fetch('/progressor/api/v1/me/connections'+path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,cache:'no-store'});}
+    try{r=await fetch('/progressor/api/v1/me/connections'+path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,cache:'no-store',signal});}
     catch{throw new Error('Не удалось получить подтверждение. Проверьте соединение и повторите действие. Введённый выбор остаётся на экране.');}
     if(!r.ok){
       const message=r.status===409?'Данные изменились в другом окне. Ваш выбор остаётся на экране. Обновление данных сбросит несохранённый выбор.':r.status===401?'Сессия закончилась. Заново откройте приложение из бота.':r.status===403?'Доступ к этим данным изменился. Обновите экран.':r.status===422?'Проверьте выбранные параметры и повторите действие.':r.status===429?'Слишком частые запросы. Немного подождите и повторите.':'Не удалось получить подтверждение от сервиса. Повторите действие позже; введённый выбор остаётся на экране.';
@@ -19,9 +19,35 @@
   function section(title,parent){const d=el('details',undefined,parent);el('summary',title,d);return d;}
   async function refresh(){current=await api('');render();}
   async function save(patch){const value=await api('',{action:'preferences',revision:current.preferences.revision,patch});current.preferences=value.preferences;render();notice.textContent='Настройки сохранены.';}
+  function todaySection(parent){
+    const overview=section('Сегодня вместе',parent);overview.open=true;overview.dataset.todayOverview='';
+    const result=el('div',undefined,overview);const state=el('p','Собираем сохранённые записи…',overview);state.setAttribute('role','status');
+    let loading=false;
+    const load=async()=>{
+      if(loading||!overview.isConnected||!dialog?.open)return;
+      loading=true;const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),2500);
+      try{
+        const v=await api('/today?target='+encodeURIComponent(source),undefined,controller.signal);
+        if(!overview.isConnected||!dialog?.open)return;
+        const healthOpen=result.querySelector('details')?.open||false;result.replaceChildren();
+        for(const item of v.sections){const row=el('div',undefined,result);el('strong',item.name,row);el('p',item.text,row);if(item.source==='supply')el('small',item.day+' · '+item.timezone,row);}
+        if(v.relationship)el('p',v.relationship,result);
+        if(!v.sections.length)el('p',v.health.rest_active?'Общий обзор на паузе. Записи остаются в своих продуктах.':'Свежих разрешённых данных для обзора пока нет. Причины — ниже.',result);
+        const health=section('Что сейчас связано',result);health.open=healthOpen;
+        for(const item of v.health.items){el('p',item.name+' · '+item.label,health);el('small',item.message,health);if(item.last_synced_at)el('small','Последнее обновление: '+new Date(item.last_synced_at).toLocaleString('ru-RU'),health);}
+        if(!v.health.hints_enabled)el('p','Автоматические подсказки выключены. Этот обзор доступен по вашему запросу.',health);
+        if(!v.health.notifications_enabled)el('p','Обычные напоминания выключены.',health);
+        el('small',v.day_label,result);el('small',v.coverage,result);
+        state.textContent='Данные на '+new Date(v.generated_at).toLocaleTimeString('ru-RU');result.dataset.fresh='true';
+      }catch(e){if(overview.isConnected&&dialog?.open){state.textContent='Обзор сейчас не обновился. '+(result.childElementCount?'Ниже показан предыдущий результат. ':'')+'Текущий продукт продолжает работать. Попробуйте обновить ещё раз.';result.dataset.fresh='false';}}
+      finally{clearTimeout(timeout);loading=false;}
+    };
+    button('Обновить обзор дня',overview,load);todayReload=load;void load();
+  }
   function render(){
     const focus=document.activeElement?.dataset?.linkField;content.replaceChildren();const p=current.preferences;
     el('p',p.rest_active?'Сейчас отдых. Напоминания и автоматические подсказки приостановлены. Срок подписки продолжается.':'Вы выбираете, какие продукты помогают друг другу. Записи остаются у каждого продукта.',content);
+    todaySection(content);
     const rest=el('div',undefined,content);rest.className='link-actions';
     button(p.rest_active?'Вернуться к обычному режиму':'Отдохнуть от напоминаний',rest,()=>save({paused:!p.rest_active,pause_until:null}));
     const connections=section('Связи и напоминания',content);connections.open=true;
@@ -159,10 +185,14 @@
     if(!dialog?.open)opener=document.activeElement;
     if(!dialog){
       const style=el('style',`#progressor-connections{box-sizing:border-box;width:min(94vw,620px);max-height:88vh;border:1px solid var(--border,#46516b);border-radius:18px;background:var(--card,#14213d);color:var(--text,#fff);padding:18px;font:15px system-ui}#progressor-connections::backdrop{background:#0009}#progressor-connections button{box-sizing:border-box;min-height:44px;border:1px solid var(--border,#64748b);border-radius:10px;padding:9px 12px;margin:5px 0;background:var(--card,#243657);color:inherit;font:inherit;cursor:pointer}#progressor-connections select{max-width:100%;min-height:44px;margin:8px;border-radius:8px;background:var(--card,#243657);color:inherit;padding:8px}#progressor-connections details{padding:10px 0;border-top:1px solid var(--border,#46516b)}#progressor-connections summary{cursor:pointer;min-height:38px;display:flex;align-items:center;font-weight:600}#progressor-connections .link-toggle{display:flex;align-items:center;gap:10px;min-height:44px;margin:5px 0}#progressor-connections input[type=checkbox]{width:22px;height:22px;flex:none}#progressor-connections small{display:block;line-height:1.5;opacity:.85}#progressor-connections p{line-height:1.5}#progressor-connections :focus-visible{outline:3px solid #60a5fa;outline-offset:2px}`,document.head);
-      dialog=el('dialog',undefined,document.body);dialog.id='progressor-connections';dialog.setAttribute('aria-labelledby','progressor-link-title');el('h2','Связь продуктов',dialog).id='progressor-link-title';notice=el('p',undefined,dialog);notice.setAttribute('role','status');content=el('div',undefined,dialog);
+      dialog=el('dialog',undefined,document.body);dialog.id='progressor-connections';dialog.setAttribute('aria-labelledby','progressor-link-title');
+      const heading=el('div',undefined,dialog);heading.className='link-heading';el('h2','Связь продуктов',heading).id='progressor-link-title';
+      const close=el('button','×',heading);close.type='button';close.setAttribute('aria-label','Закрыть');close.addEventListener('click',()=>dialog.close());
+      notice=el('p',undefined,dialog);notice.setAttribute('role','status');content=el('div',undefined,dialog);
+      el('style','#progressor-connections .link-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}#progressor-connections .link-heading h2{min-width:0;margin:0;overflow-wrap:anywhere}#progressor-connections .link-heading button{flex:none;min-width:44px}',document.head);
       // Host card colors can be translucent; the modal needs an opaque surface.
       el('style','#progressor-connections{background:#14213d;color:#f1f5f9}#progressor-connections button,#progressor-connections select{background:#243657;color:#f1f5f9;border-color:#64748b}#progressor-connections,#progressor-connections *{font-family:system-ui,-apple-system,"Segoe UI",sans-serif!important}#progressor-connections input:not([type=checkbox]){box-sizing:border-box;max-width:100%;min-height:44px;padding:8px;border:1px solid #64748b;border-radius:8px;background:#243657;color:#f1f5f9}',document.head);
-      button('Закрыть',dialog,async()=>dialog.close());dialog.addEventListener('close',()=>opener?.focus());
+      dialog.addEventListener('close',()=>opener?.focus());
       dialog.addEventListener('keydown',event=>{
         if(event.key!=='Tab')return;
         const controls=[...dialog.querySelectorAll('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary,[tabindex="0"]')].filter(n=>n.getClientRects().length&&!n.closest('[hidden]'));
@@ -180,4 +210,6 @@
   }
   window.Progressor=window.Progressor||{};window.Progressor.openConnections=open;
   document.addEventListener('progressor:open-connections',open);
+  setInterval(()=>{if(dialog?.open&&!document.hidden)void todayReload?.();},30000);
+  document.addEventListener('visibilitychange',()=>{if(dialog?.open&&!document.hidden)void todayReload?.();});
 })();

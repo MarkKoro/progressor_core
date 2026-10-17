@@ -107,6 +107,7 @@ def validate_payload(kind,payload):
         for row in rows: nutrient(row)
     elif kind=='daily_nutrition.updated':
         date.fromisoformat(payload['source_local_date'])
+        if payload.get('latest_meal_at') is not None: utc(payload['latest_meal_at'])
         macros(payload.get('totals')); nonnegative(payload.get('logged_meal_count'),integer=True)
         rows=payload.get('nutrients',{})
         if not isinstance(rows,dict) or len(rows)>len(CATALOG): raise ValueError('invalid_nutrients')

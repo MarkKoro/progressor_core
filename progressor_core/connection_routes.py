@@ -19,11 +19,13 @@ def install(app,engine,claims):
 
     def read(store,uid):
         from .training_rhythm import proposal,active
+        from .daily_overview import connection_health
         snapshot=store.settings_snapshot(uid)
         rhythm=active(store,uid,snapshot=snapshot)
         return {'preferences':{**links.preferences(store,uid),'rhythm':rhythm,'synced_at':__import__('time').time()},'weight':links.weight_choices(store,uid,snapshot=snapshot),
                 'coach':links.coach_permissions(store,uid,snapshot=snapshot),'food_groups':links.FOOD_GROUPS,'help':links.FAQ,
-                'rhythm':{'proposal':proposal(store,uid,snapshot=snapshot),'active':rhythm}}
+                'rhythm':{'proposal':proposal(store,uid,snapshot=snapshot),'active':rhythm},
+                'health':connection_health(store,uid,snapshot=snapshot)}
 
     def action(store,uid,body):
         kind=body.get('action')
@@ -53,6 +55,12 @@ def install(app,engine,claims):
 
     @app.get('/api/v1/me/connections/weekly')
     def weekly(request:Request):return links.weekly_overview(engine(request).store,claims(request)['sub'])
+
+    @app.get('/api/v1/me/connections/today')
+    def today(request:Request,target:str):
+        from .daily_overview import daily_overview
+        if target not in links.SOURCES:raise HTTPException(422,'Invalid target')
+        return daily_overview(engine(request).store,claims(request)['sub'],target=target)
 
     @app.get('/api/v1/me/connections/changes')
     def changes(request:Request):
@@ -101,6 +109,13 @@ def install(app,engine,claims):
     async def private_weekly(request:Request):
         _,body=await private(request)
         try:return await run_in_threadpool(links.weekly_overview,engine(request).store,subject(body['user_id']))
+        except (ValueError,KeyError,TypeError):raise HTTPException(422,'Invalid identity')
+
+    @app.post('/internal/v1/connections/today')
+    async def private_today(request:Request):
+        source,body=await private(request)
+        from .daily_overview import daily_overview
+        try:return await run_in_threadpool(daily_overview,engine(request).store,subject(body['user_id']),target=source)
         except (ValueError,KeyError,TypeError):raise HTTPException(422,'Invalid identity')
 
     @app.post('/internal/v1/connections/changes')

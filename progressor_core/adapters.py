@@ -209,6 +209,10 @@ def food(db):
         entities.append(entity('meal:' + str(row['id']), row['user_id'], 'meal.logged', occurred_at, source_local_date=day, timezone=tz, timestamp_basis='legacy_server_timezone', source_revision=row['version'], macros=macros, nutrients=observations, estimate_quality='food_logged_estimate',display_title=display_title))
         total = days.setdefault((row['user_id'], day), {'totals': {k: 0.0 for k in macros}, 'logged_meal_count': 0, 'nutrients': {}})
         total['logged_meal_count'] += 1
+        # Save-time provenance belongs to the source's existing diary day. Never
+        # shift a backdated meal into today merely because it was entered today.
+        if row['created_at']:
+            total['latest_meal_at'] = max(total.get('latest_meal_at', ''), occurred_at)
         for key, value in macros.items():
             total['totals'][key] += value
         for observation in observations:

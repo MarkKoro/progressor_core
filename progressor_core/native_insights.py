@@ -2,6 +2,8 @@
 from datetime import datetime, timedelta, timezone
 from shared.workout_metrics import compare_load, energy_estimate
 from .profiles import resolve_profile
+from .journey import workout_follow_up
+from shared.food_sources import examples, macro_examples
 
 
 def parsed(value):
@@ -36,21 +38,23 @@ def enrich_workouts(entities, now, *, selected_ids=None):
     return selected
 
 
-def native_hints(data, entities, now, day):
+def native_hints(data, entities, now, day, *, food_preferences=None):
     hints=[]; activity=data.get('activity'); nutrition=data.get('nutrition'); supply=data.get('supply')
     seven=(nutrition or {}).get('history',{}).get('7',{}) if (nutrition or {}).get('history') else {}
     targets=(nutrition or {}).get('targets') or {}
     source=lambda name:data['sources'].get(name,{}).get('status')=='ok'
     base={'rule_version':1,'delivery':'inline_only','dismiss_days':7}
-    today=activity.get('workouts',[]) if activity and source('gym') else []
-    if today:
-        working_sets=sum((w.get('strength_metrics') or {}).get('working_sets',w.get('strength_sets',0)) for w in today)
-        reps=sum((w.get('strength_metrics') or {}).get('repetitions',0) for w in today)
+    recorded_today=activity.get('workouts',[]) if activity and source('gym') else []
+    today=[w for w in recorded_today if w.get('session_complete',True)]
+    follow_up=workout_follow_up(data,now)
+    if today and follow_up not in ('food_day_confirmed','food_recorded_after_workout'):
+        working_sets=sum((w.get('strength_metrics') or {}).get('working_sets',w.get('strength_sets',0)) for w in recorded_today)
+        reps=sum((w.get('strength_metrics') or {}).get('repetitions',0) for w in recorded_today)
         increased=any(w.get('load_comparison',{}).get('status')=='higher_recorded_load' for w in today)
         decreased=not increased and any(w.get('load_comparison',{}).get('status')=='lower_recorded_load' for w in today)
         title='Сегодня больше нагрузки' if increased else 'Сегодня меньше записанной нагрузки' if decreased else 'Тренировка учтена'
-        partial=any(w.get('session_complete') is False for w in today)
-        message=f"Сегодня учтено тренировочных записей — {len(today)}." if partial else f"Сегодня завершено занятий — {len(today)}."
+        partial=len(recorded_today)!=len(today)
+        message=f"Сегодня учтено тренировочных записей — {len(recorded_today)}; завершено — {len(today)}." if partial else f"Сегодня завершено занятий — {len(today)}."
         if working_sets: message+=f" Рабочих подходов — {working_sets}"+(f", повторений — {reps}." if reps else '.')
         if increased: message+=' Объём тех же упражнений выше обычного.'
         elif decreased:message+=' Объём тех же упражнений ниже обычного. Это не измерение расхода энергии.'
@@ -64,7 +68,7 @@ def native_hints(data, entities, now, day):
             elif targets.get('kcal') and means.get('kcal') is not None and means['kcal']<targets['kcal']*.8:
                 message+=f" За последнюю неделю записано дней — {seven['logged_days']}. В среднем по этим дням: {means['kcal']:g} ккал при вашей цели {targets['kcal']:g} ккал."
         estimates=[w['energy_estimate'] for w in today if w.get('energy_estimate')]
-        if len(estimates)==len(today):
+        if len(estimates)==len(recorded_today):
             lo=sum(e['net_above_rest_kcal_range'][0] for e in estimates); hi=sum(e['net_above_rest_kcal_range'][1] for e in estimates)
             message+=f" Сверх покоя примерно {lo}–{hi} ккал."
         message+=' Цель питания не менялась.'
@@ -79,15 +83,17 @@ def native_hints(data, entities, now, day):
         message=f"За последнюю неделю записано дней — {seven['logged_days']}. Белок в среднем по этим дням — {protein:g} г/день при вашей цели {goal:g} г."
         if len(training)>=3: message+=f" Тренировок за 14 дней — {len(training)}."
         message+=' Проверьте полноту дневника и цель.'
+        foods=macro_examples('protein',food_preferences)
+        if foods: message+=' Возможные пищевые источники: '+ '; '.join(foods)+'.'
         hints.append({**base,'key':'logged_protein.v2','targets':['supply','gym']+(['food'] if len(training)>=3 else []),'priority':20,'title':'Белок в вашем журнале',
                       'message':message,'action':{'kind':'open_food','label':'Посмотреть питание'},
                       'basis':seven.get('provenance',[])+([{'source':'gym','event_id':e['event_id'],'occurred_at':e['payload']['completed_at']} for e in training] if len(training)>=3 else []),'details':'80% личной цели — правило показа подсказки, не медицинский порог. По неполному дневнику нельзя определить недоедание или назначить добавку.'})
     # Intentionally conservative source-review rule. This is NOT personal RDA or
     # a clinical deficiency model. All logged days and most components must be known.
     if source('food') and seven.get('logged_days',0)>=5 and seven.get('logged_meals',0)>=10:
-        for code,name,limit,unit,foods in (
-            ('iron','железа',4.0,'mg','Бобовые, мясо и обогащённые продукты могут быть источниками железа.'),
-            ('vitamin_b12','витамина B12',1.2,'ug','Рыба, яйца, молочные и обогащённые продукты могут быть источниками B12.')):
+        for code,name,limit,unit in (
+            ('iron','железа',4.0,'mg'),
+            ('vitamin_b12','витамина B12',1.2,'ug')):
             n=seven.get('nutrients',{}).get(code,{})
             if (n.get('unit')!=unit or n.get('observed_days')!=seven['logged_days']
                 or n.get('observed_meals',0)<seven['logged_meals']*.8
@@ -96,6 +102,8 @@ def native_hints(data, entities, now, day):
             # Existing stack amounts are unparsed. Never claim missing total intake.
             terms=('желез','iron','ferrous') if code=='iron' else ('b12','b-12','в12','cobalamin','кобаламин')
             already=any(any(t in p.get('name','').lower() for t in terms) for p in (supply or {}).get('active_supplements',[]))
+            atlas=examples(code,food_preferences)
+            foods=('Под ваши предпочтения: '+ '; '.join(i['name'] for i in atlas['items'][:3])+'.') if atlas['items'] else 'Под ваши исключения подтверждённых пищевых примеров пока нет; новый источник не выдумываем.'
             hints.append({**base,'key':'food_sources_'+code+'.v1','targets':['food']+(['supply'] if supply and source('supply') else []),'priority':15,
                 'title':'Источники '+name+' в рационе',
                 'message':f"За {seven['logged_days']} дней в записанных блюдах оценка {name} невысокая. {foods}"+(' В Supply уже есть соответствующая добавка; её дозу мы не складываем с едой.' if already else ''),

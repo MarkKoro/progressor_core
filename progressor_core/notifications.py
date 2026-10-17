@@ -27,11 +27,12 @@ def candidate(store,user_id,prefs,now=None,enabled_sources=None):
         workouts=(c.get('activity') or {}).get('workouts',[])
         fresh=[]
         for w in workouts:
+            if w.get('session_complete') is False: continue
             stamp=datetime.fromisoformat(w['completed_at'].replace('Z','+00:00'))
             if now-timedelta(hours=2)<=stamp<=now-timedelta(minutes=30) and stamp.timestamp()>max(prefs.get('enabled_at',now.timestamp()),policy.get('last_pause_started_at',0)) and not w.get('backfilled'):
                 fresh.append(w)
         hint=next((h for h in c['hints'] if h['key']=='workout_today.v1'),None)
-        if fresh and hint and unseen(hint):
+        if fresh and hint and unseen(hint) and not any(w.get('session_complete') is False for w in workouts) and c.get('workout_follow_up') not in ('food_day_confirmed','food_recorded_after_workout'):
             day=(c.get('nutrition') or {}).get('today') or {};remaining=day.get('remaining_to_personal_goal')
             text='Тренировка записана в Gym. '
             if remaining:

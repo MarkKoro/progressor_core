@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS events(event_id TEXT PRIMARY KEY, hash TEXT NOT NULL,
 CREATE TABLE IF NOT EXISTS entities(source TEXT NOT NULL, entity_id TEXT NOT NULL, user_id TEXT NOT NULL, revision INTEGER NOT NULL, hash TEXT NOT NULL, event_id TEXT NOT NULL, type TEXT NOT NULL, deleted INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(source,entity_id));
 CREATE INDEX IF NOT EXISTS entities_user ON entities(user_id,source,deleted);
 CREATE INDEX IF NOT EXISTS entities_owner_kind ON entities(user_id,deleted,entity_id);
+CREATE INDEX IF NOT EXISTS intake_owner_day ON entities(user_id,json_extract(payload,'$.source_local_date') DESC,entity_id DESC) WHERE source='supply' AND deleted=0 AND entity_id GLOB 'intake:*';
 CREATE TABLE IF NOT EXISTS source_state(source TEXT PRIMARY KEY, status TEXT NOT NULL, observed_at REAL NOT NULL, last_success REAL, failures INTEGER NOT NULL DEFAULT 0, retry_at REAL NOT NULL DEFAULT 0, reason TEXT);
 CREATE TABLE IF NOT EXISTS adapter_state(source TEXT NOT NULL, entity_id TEXT NOT NULL, user_id TEXT NOT NULL, revision INTEGER NOT NULL, hash TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(source,entity_id));
 CREATE TABLE IF NOT EXISTS dead_letters(id INTEGER PRIMARY KEY, source TEXT NOT NULL, reason TEXT NOT NULL, payload_hash TEXT NOT NULL, received_at TEXT NOT NULL);
@@ -214,6 +215,36 @@ class Store:
             state={row['source']:dict(row) for row in db.execute('SELECT * FROM source_state')}
             taken=db.execute("SELECT count(*) FROM entities WHERE user_id=? AND source='supply' AND deleted=0 AND entity_id GLOB 'intake:*' AND json_extract(payload,'$.status')='taken'",(user_id,)).fetchone()[0]
         return (entities,memberships,state),{'supply_taken_count':taken}
+
+    def daily_snapshot(self, user_id, day):
+        """Owned day facts only: no history vectors, lab rows or hint writes."""
+        import json
+        from datetime import date, timedelta
+        requested = date.fromisoformat(day)
+        start = day + 'T00:00:00+03:00'
+        end = (requested + timedelta(days=1)).isoformat() + 'T00:00:00+03:00'
+        with self.connection() as db:
+            db.execute('BEGIN')
+            rows = db.execute("""SELECT e.source,e.entity_id,e.user_id,e.revision,e.event_id,
+                CASE WHEN e.source='gym' THEN json_remove(e.payload,'$.strength_metrics.exercises')
+                     ELSE e.payload END AS payload,ev.occurred_at
+                FROM entities e JOIN events ev ON ev.event_id=e.event_id
+                WHERE e.user_id=? AND e.deleted=0 AND (
+                    (e.entity_id GLOB 'profile:*' AND json_extract(e.payload,'$.profile_kind') IS NULL)
+                    OR (e.source='food' AND e.entity_id GLOB 'daily:*' AND json_extract(e.payload,'$.source_local_date')=?)
+                    OR (e.source='gym' AND e.entity_id GLOB 'workout:*'
+                        AND julianday(json_extract(e.payload,'$.completed_at'))>=julianday(?)
+                        AND julianday(json_extract(e.payload,'$.completed_at'))<julianday(?)))""",
+                (user_id, day, start, end))
+            entities = [{**dict(row), 'payload': json.loads(row['payload'])} for row in rows]
+            members = [dict(row) for row in db.execute('SELECT source,local_id,active FROM memberships WHERE user_id=?', (user_id,))]
+            state = {row['source']: dict(row) for row in db.execute('SELECT * FROM source_state')}
+            counts = [dict(row) for row in db.execute("""SELECT json_extract(payload,'$.source_local_date') AS day,
+                json_extract(payload,'$.status') AS status,count(*) AS records FROM entities
+                WHERE user_id=? AND source='supply' AND deleted=0 AND entity_id GLOB 'intake:*'
+                AND json_extract(payload,'$.source_local_date') BETWEEN ? AND ? GROUP BY day,status""",
+                (user_id, (requested-timedelta(days=1)).isoformat(), (requested+timedelta(days=1)).isoformat()))]
+        return (entities, members, state), counts
 
     def remember(self, user_id, rule, window, recommendation):
         fingerprint = digest(recommendation) if recommendation else None

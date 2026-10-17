@@ -28,6 +28,7 @@ class WorkoutSurfaces(unittest.TestCase):
         self.assertEqual(sum(w['strength_metrics']['working_sets'] for w in c['activity']['workouts']),2)
         self.assertEqual(sum(w['strength_metrics']['repetitions'] for w in c['activity']['workouts']),22)
         self.assertIn('тренировочных записей',c['inline_hint']['message'])
+        self.assertIn('Рабочих подходов — 2, повторений — 22',c['inline_hint']['message'])
         self.assertEqual(self.sync()['activity'],c['activity'])
     def test_drafts_undone_exercises_and_removed_sets_do_not_count(self):
         with sqlite3.connect(self.paths['gym']) as db:db.execute('DELETE FROM sets WHERE id=31')
