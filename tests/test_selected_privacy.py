@@ -150,15 +150,17 @@ class SelectedPrivacy(unittest.TestCase):
         second=build_ai_context(self.store,self.uid,'gym',self.now)
         self.assertNotEqual(ai_cache.key(first),ai_cache.key(second))
 
-    def test_goal_related_native_hint_read_not_completion_and_no_entity_type_error(self):
+    def test_goal_related_hint_seen_workout_and_intake_do_not_prove_review(self):
         self.event('food','target:'+self.uid,'nutrition_target.changed',{'targets':{'kcal':1900,'protein':100,'fat':70,'carbs':200}})
         for target in ('gym','supply'):
             item=hints(self.store,self.uid,target)[0]
             self.assertEqual(item['action']['kind'],'gym_plan' if target=='gym' else 'supply_plan')
+            self.assertTrue(item['reviewable'])
             self.store.mark_hint_seen(self.uid,target,item['delivery_key']);self.assertTrue(hints(self.store,self.uid,target))
         self.stamp=(self.now+timedelta(seconds=3)).isoformat()
         self.event('gym','workout:selected-finished','workout.completed',{'completed_at':self.stamp,'source_local_date':self.now.date().isoformat(),'timezone':'UTC','workout_type':'strength','duration_seconds':None,'strength_sets':3,'session_complete':True})
-        self.assertFalse(hints(self.store,self.uid,'gym'));self.assertTrue(hints(self.store,self.uid,'supply'))
+        self.event('supply','intake:selected-taken','supplement.taken',{'source_local_date':self.now.date().isoformat(),'timezone':'UTC','status':'taken','supplement_id':'5'})
+        self.assertTrue(hints(self.store,self.uid,'gym'));self.assertTrue(hints(self.store,self.uid,'supply'))
 
     def test_quiet_retains_read_hint_and_limits_different_new_hint_across_products(self):
         from progressor_core.context import build_context

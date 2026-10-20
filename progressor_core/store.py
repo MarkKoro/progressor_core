@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS notification_routes(recommendation_id TEXT PRIMARY KE
 CREATE TABLE IF NOT EXISTS hint_preferences(user_id TEXT NOT NULL,target TEXT NOT NULL,dismissed_until REAL NOT NULL,PRIMARY KEY(user_id,target));
 CREATE TABLE IF NOT EXISTS offer_preferences(user_id TEXT NOT NULL,target TEXT NOT NULL,dismissed_until REAL NOT NULL,PRIMARY KEY(user_id,target));
 CREATE TABLE IF NOT EXISTS hint_seen(user_id TEXT NOT NULL,target TEXT NOT NULL,delivery_key TEXT NOT NULL,seen_at REAL NOT NULL,PRIMARY KEY(user_id,target,delivery_key));
+CREATE TABLE IF NOT EXISTS hint_reviews(user_id TEXT NOT NULL,target TEXT NOT NULL,delivery_key TEXT NOT NULL,reviewed_at REAL NOT NULL,PRIMARY KEY(user_id,target,delivery_key));
+CREATE INDEX IF NOT EXISTS hint_reviews_time ON hint_reviews(reviewed_at);
 '''
 
 
@@ -176,8 +178,9 @@ class Store:
         """One request-owned projection, without decoding every meal/intake.
 
         Food daily aggregates own the journal totals. Keep the last 90 intake
-        rows and the latest real taken action for goal-review completion, while
-        counting lifetime taken rows in SQL. Other readers retain full data().
+        rows and the latest real taken action for compatible context readers,
+        while counting lifetime taken rows in SQL. Taken does not prove review.
+        Other readers retain full data().
         No cached access decision survives the request.
         """
         import json
@@ -271,6 +274,29 @@ class Store:
     def hint_was_seen(self,user_id,target,delivery_key):
         with self.connection() as db:
             return bool(db.execute('SELECT 1 FROM hint_seen WHERE user_id=? AND target=? AND delivery_key=?',(user_id,target,delivery_key)).fetchone())
+
+    def mark_hint_reviewed(self, user_id, target, delivery_key, *, db=None):
+        """Record only an explicitly validated review; duplicate receipts keep their time."""
+        if db is None:
+            with self.connection() as connection:
+                connection.execute('BEGIN IMMEDIATE')
+                return self.mark_hint_reviewed(user_id, target, delivery_key, db=connection)
+        stamp = time.time()
+        existing = db.execute('SELECT reviewed_at FROM hint_reviews WHERE user_id=? AND target=? AND delivery_key=? AND reviewed_at>=?',
+                              (user_id, target, delivery_key, stamp - 90 * 86400)).fetchone()
+        if existing:
+            return existing[0]
+        db.execute('DELETE FROM hint_reviews WHERE reviewed_at<?', (stamp - 90 * 86400,))
+        db.execute('INSERT OR IGNORE INTO hint_reviews VALUES(?,?,?,?)',
+                   (user_id, target, delivery_key, stamp))
+        return db.execute('SELECT reviewed_at FROM hint_reviews WHERE user_id=? AND target=? AND delivery_key=?',
+                          (user_id, target, delivery_key)).fetchone()[0]
+
+    def reviewed_hint_keys(self, user_id, target):
+        with self.connection() as db:
+            return {row[0] for row in db.execute(
+                'SELECT delivery_key FROM hint_reviews WHERE user_id=? AND target=? AND reviewed_at>=?',
+                (user_id, target, time.time() - 90 * 86400))}
 
     def hints_dismissed(self, user_id, target):
         with self.connection() as db:

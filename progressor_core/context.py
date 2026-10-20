@@ -99,11 +99,13 @@ def build_context(store, user_id, now=None, requested_day=None, target=None, ena
     data['hints']=native_hints(data,fresh_entities,now,day,food_preferences=policy) if policy['hints'] else []
     from .connection_changes import recent,hints
     data['recent_changes']=recent(store,user_id,now,snapshot=request_snapshot)
-    data['hints']+=hints(store,user_id,target,now,snapshot=request_snapshot,changes=data['recent_changes']['items']) if target else []
+    data['hints']+=hints(store,user_id,target,now,snapshot=request_snapshot,changes=data['recent_changes']['items'],enabled_sources=enabled_sources) if target else []
     data['hints'].sort(key=lambda h:(h['priority'],h['key']))
     for hint in data['hints']:
         hint.setdefault('delivery_key',hint['key']+':'+day.isoformat())
         hint['date']=day.isoformat()
+    reviewed=store.reviewed_hint_keys(user_id,target) if target else set()
+    data['hints']=[h for h in data['hints'] if not (h.get('reviewable') is True and h['delivery_key'] in reviewed)]
     data['inline_hint']=next((h for h in data['hints'] if target in h['targets']),None) if target and not store.hints_dismissed(user_id,target) else None
     if policy['frequency']=='quiet' and data['inline_hint']:
         with store.connection() as db:last=db.execute('SELECT delivery_key FROM hint_seen WHERE user_id=? AND seen_at>? ORDER BY seen_at DESC LIMIT 1',(user_id,now.timestamp()-7*86400)).fetchone()

@@ -23,7 +23,7 @@ Core пишет только свою SQLite. Владельцы публику�
 | К21 | Добровольная привязка конкретного слота Supply к новой Food записи≤90мин перед временем. При отсутствующей/поздней/устаревшей записи остаётся native время. Единый reminder_fires ledger на original slot исключает meal+scheduled дубль. UTC timestamp и entity id, без позиций еды. |
 | К25 | При плохом check-in показывать подтверждённые изменения веса/цели/пищевых записей/тренировок/приёмов, только разрешённые свежие источники. Это совпадение во времени, не причина симптомов. |
 | К28 | Own timezone preview с часами/местными слотами, отдельный confirm и CAS. История дат не переписывается; Gym historical UTC projection использует owner transition ledger. Food notification TZ не меняет существующую московскую границу журнала. |
-| К32,К36,К51 | Opt-in Food review после нового веса Supply; смена Food цели→добровольный переход к собственному плану Gym/Supply. Нет жиросжигателей/автодоз/автозамены силовых. Чтение не completion; поздняя сохранённая цель/занятие/приём — проверяемое действие. |
+| К32,К36,К51 | Opt-in Food review после нового веса Supply (`food_goal`); смена Food цели→добровольный переход к собственному плану Gym/Supply. Нет жиросжигателей/автодоз/автозамены силовых. Чтение/seen и позднее занятие/приём не доказывают пересмотр. Явное «проверено» закрывает только конкретное изменение и target; новая цель Food также завершает прежнюю проверку после веса. |
 | К53 | «Связь продуктов» в native меню и общем WebApp: источники, подсказки, уведомления, отдых, частота, питание, weekly/rhythm, trainer permissions. Quiet: одна новая подсказка за7д во всех продуктах, уже прочитанная может оставаться. |
 | К71 | Own AI cache12 на человека,512 суммарно,≤128KiB/result, TTL Food6ч/Gym/Supply1ч. Exact input/model/prompt/context+permission revision. Guards/access/quota до cache; hit не списывает повторный Food запрос/Gym quota. Повтор голоса может требовать транскрипции. Purge own cache; не кэшировать некорректный результат, не продлевать TTL на hit. |
 | К76 | Исключение только для aggregate nutrition: accepted fresh native trainer role/link, оплаченные Gym coach+Gym/Food pupil, отдельные согласия КБЖУ/top5,7/30/90д. Без отдельных позиций/нутриентов/Supply/анализов/передачи в тренерский ИИ. Deactivate/reaccept не воскрешает согласие; новые данные/permission проверяются при каждом запросе. Native Gym меню подопечного. |
@@ -34,6 +34,19 @@ Core пишет только свою SQLite. Владельцы публику�
 `shared/product_links.py`→progressor_links.py; `ai_cache.py`→progressor_ai_cache.py; `day_goal.py`→progressor_day_goal.py; `food_sources.py`→progressor_food_sources.py; `timezone_history.py`→progressor_timezone_history.py. Также прежние bridge/client/bot/ai_guard/native_subscription, Gym workout_metrics и Food nutrition_plan. Копии синхронизируются `deploy/sync_bot_helpers.py`, затем тестируются/публикуются main владельцев. Общий JS navigation/connections обслуживает только Core. Update-core не обновляет копии ботов.
 
 Новые таблицы additive. Чистка собственных Food/Supply данных удаляет их новые cache/intents/confirmed composition. Настройки общей связи принадлежат Core; чистка одного продукта не удаляет чужую историю/оплату. Core tombstones/consent/source freshness исключают недоступные данные из новых ответов.
+
+Подсказки изменений веса/цели имеют `reviewable:true`. Отдельный
+`POST /api/v1/me/hints/reviewed` принимает только `{target,delivery_key}` (≤512 байт),
+определяет владельца по подписанной core-audience identity и повторно проверяет
+текущую применимость, enabled source/target, доступ, consent, свежесть и отдых.
+Core-only `hint_reviews(user_id,target,delivery_key,reviewed_at)` хранит явную
+квитанцию. Успех: HTTP200 `{reviewed:true,target,delivery_key,reviewed_at}`, где
+`reviewed_at` — положительное конечное число секунд Unix UTC. Повтор актуального
+подтверждения возвращает то же время без повторной мутации квитанции, не меняет
+дневники/дозы/планы. Старый receipt не закрывает новое изменение или другой target.
+Контекст скрывает только эту reviewed подсказку; GET не создаёт квитанцию,
+существующие seen и скрытие target на7д остаются отдельными. Очистка старше90д
+выполняется при явной записи, без AI и без восстановления прежней базы при откате.
 
 ## Расчёты и доставка
 

@@ -265,6 +265,37 @@ def create_app(config=None):
         await run_in_threadpool(engine(request).store.mark_hint_seen,identity['sub'],target,key)
         return {'seen':True}
 
+    @app.post('/api/v1/me/hints/reviewed')
+    async def hint_reviewed(request: Request):
+        identity=claims(request);raw=await request.body()
+        if len(raw)>512:raise HTTPException(413,'Body too large')
+        try:
+            body=json.loads(raw)
+            if not isinstance(body,dict) or set(body)!={'target','delivery_key'}:raise ValueError('body')
+            target=body['target'];key=body['delivery_key']
+            if target not in SOURCES or target not in engine(request).config.enabled_domains:raise ValueError('target')
+            if not isinstance(key,str) or not 1<=len(key)<=160:raise ValueError('key')
+        except (KeyError,TypeError,ValueError):raise HTTPException(422,'Invalid review')
+
+        def persist_review():
+            from .connection_changes import hints as change_hints
+            store=engine(request).store
+            # Reserve the Core writer while checking current source/policy
+            # state. Unlike build_context, this reader does not remember a
+            # recommendation or filter an existing review receipt, so a lost
+            # response can safely replay the same still-applicable command.
+            with store.connection() as db:
+                db.execute('BEGIN IMMEDIATE')
+                snapshot=store.settings_snapshot(identity['sub'])
+                current=change_hints(store,identity['sub'],target,snapshot=snapshot,enabled_sources=engine(request).config.enabled_domains)
+                if not any(h.get('reviewable') is True and h.get('delivery_key')==key
+                           and target in h['targets'] for h in current):raise ValueError('not_applicable')
+                return store.mark_hint_reviewed(identity['sub'],target,key,db=db)
+        try:
+            reviewed_at=await run_in_threadpool(persist_review)
+        except ValueError:raise HTTPException(422,'Review no longer applicable')
+        return {'reviewed':True,'target':target,'delivery_key':key,'reviewed_at':reviewed_at}
+
     @app.post('/api/v1/events')
     async def events(request: Request):
         cfg = engine(request).config

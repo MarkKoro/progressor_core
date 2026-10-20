@@ -38,8 +38,12 @@ def recent(store,user_id,now=None,*,snapshot=None):
     now=now or datetime.now(timezone.utc);uid=subject(user_id);policy=preferences(store,uid,now.timestamp())
     entities,_,_=permitted_entities(store,uid,now,snapshot=snapshot);allowed={e['source'] for e in entities}
     if policy['rest_active']:allowed=set()
+    # observed_at retains time.time() sub-microsecond precision on Windows;
+    # datetime truncates to microseconds. The same clock instant may otherwise
+    # hide a just-committed change from the first subsequent read.
+    cutoff=now.timestamp()+.000001
     with store.connection() as db:
-        rows=[dict(r) for r in db.execute('SELECT * FROM connection_changes WHERE user_id=? AND observed_at>? AND observed_at<=? ORDER BY observed_at DESC LIMIT 100',(uid,(now-timedelta(days=7)).timestamp(),now.timestamp())) if r['source'] in allowed]
+        rows=[dict(r) for r in db.execute('SELECT * FROM connection_changes WHERE user_id=? AND observed_at>? AND observed_at<=? ORDER BY observed_at DESC LIMIT 100',(uid,(now-timedelta(days=7)).timestamp(),cutoff)) if r['source'] in allowed]
     result=[]
     names={'food':'Food','gym':'Gym Diary','supply':'Supply'}
     for row in rows[:12]:
@@ -53,15 +57,24 @@ def recent(store,user_id,now=None,*,snapshot=None):
         result.append({**row,'text':text})
     return {'items':result,'message':'Изменения в ваших записях за неделю. Совпадение по времени не устанавливает причину самочувствия.'}
 
-def hints(store,user_id,target,now=None,*,snapshot=None,changes=None):
+def hints(store,user_id,target,now=None,*,snapshot=None,changes=None,enabled_sources=None):
     from .connections import preferences,permitted_entities
+    from .daily_overview import connection_health
     now=now or datetime.now(timezone.utc);policy=preferences(store,user_id,now.timestamp())
     if not policy['hints'] or policy['rest_active']:return []
+    # The existing source-health predicate also enforces Supply consent. Keep
+    # review applicability on that boundary, including its receiving product.
+    health=connection_health(store,user_id,now,target=target,snapshot=snapshot,policy=policy)
+    ready={row['source'] for row in health['items'] if row['status']=='ready'}
+    if enabled_sources is not None:ready.intersection_update(enabled_sources)
+    if target not in ready:return []
     entities,_,_=permitted_entities(store,user_id,now,snapshot=snapshot)
     if target not in {e['source'] for e in entities}:return []
+    current_events={e['event_id'] for e in entities}
     changes=changes if changes is not None else recent(store,user_id,now,snapshot=snapshot)['items'];result=[]
     for item in changes:
         if now.timestamp()-item['observed_at']>2*86400:continue
+        if item['source'] not in ready or item['details']['event_id'] not in current_events:continue
         if item['kind']=='weight' and policy['weight_notifications'] and target=='food' and policy['sources']['food']:
             if item['observed_at'] < max(policy.get('weight_enabled_at') or now.timestamp(),policy.get('last_pause_started_at',0)):continue
             # Actual goal edit after this change completes the review. Reading a
@@ -69,14 +82,13 @@ def hints(store,user_id,target,now=None,*,snapshot=None,changes=None):
             if any(c['kind']=='goal' and c['observed_at']>=item['observed_at'] for c in changes):continue
             title='Новый вес — проверить цель?';message=item['text']+' Проверьте, подходит ли текущая цель питания. Самостоятельно мы её не меняли.'
         elif item['kind']=='goal' and policy['goal_links'] and target in ('gym','supply'):
-            # A view is not completion. A later saved workout/intake is an
-            # actual native action; imported historical records do not count.
-            if any(e['source']==target and e['entity_id'].startswith('workout:' if target=='gym' else 'intake:') and e['occurred_at']>item['details']['occurred_at'] and not e['payload'].get('backfilled') and (e['payload'].get('session_complete',True) if target=='gym' else e['payload'].get('status')=='taken') for e in entities):continue
+            # A saved workout/intake proves that action, not a plan review.
+            # Explicit review receipts are filtered separately by context.
             title='Новая цель питания';message='В Food изменена цель. Можно сверить ваш план в '+('Gym Diary: сохраняйте силовые, а посильную аэробную активность выбирайте по самочувствию. Упражнения автоматически не меняются.' if target=='gym' else 'Supply. Добавки для похудения не назначаем по смене цели; проверьте уже выбранные вами приёмы.')
         else:continue
         key='change_'+item['kind']+'.v1';delivery=key+':'+item['id']
         result.append({'key':key,'targets':[target],'priority':12,'rule_version':1,'delivery':'inline_only',
-            'delivery_key':delivery,'title':title,'message':message,'action':{'kind':'open_food' if target=='food' else 'gym_plan' if target=='gym' else 'supply_plan','label':'Проверить цель Food' if target=='food' else 'Мой план тренировок' if target=='gym' else 'Мои приёмы'},
+            'delivery_key':delivery,'reviewable':True,'title':title,'message':message,'action':{'kind':'food_goal' if target=='food' else 'gym_plan' if target=='gym' else 'supply_plan','label':'Проверить цель Food' if target=='food' else 'Мой план тренировок' if target=='gym' else 'Мои приёмы'},
             'basis':[{'source':item['source'],'event_id':item['details']['event_id']}],
             'details':item['text']+' Личные цели и записи меняются только обычным подтверждённым действием в своём продукте.'})
         break

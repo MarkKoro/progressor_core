@@ -66,6 +66,44 @@
    };
   }
 
+  // A purpose marker selects only an existing native view. It never grants access.
+  // The sole continuation record is tab-local, short-lived and bound to the launch.
+  const transferKey='progressor.transfer.v1',transferTtl=10*60*1000;
+  const actionDomains={food_goal:'food',food_log:'food',open_food:'food',gym_plan:'gym',supply_plan:'supply',supply_catalog:'supply'};
+  const returnViews={food:['today','analytics','subscription'],gym:['today','settings','library','allExercises','measurements','achievements','teams','subscription'],supply:['today','catalog','profile','achievements']};
+  const arrivalParams=new URLSearchParams(location.search);
+  const arrivalAction=arrivalParams.get('progressor_action'),arrivalReturn=arrivalParams.get('progressor_return');
+  let interactionRevision=0;
+  for(const event of ['pointerdown','keydown','input','change'])document.addEventListener(event,()=>{interactionRevision++;},true);
+  window.Progressor.interactionRevision=()=>interactionRevision;
+  const currentAuth=()=>{const state=localBridge?localBridge.getState():saved;return {owner:String(state.session?.user?.id||''),proof:state.launchData||''};};
+  const sameAuth=(a,b=currentAuth())=>!!a.owner && a.owner===b.owner && a.proof===b.proof;
+  function cleanAction(action){
+    if(!action || !Object.hasOwn(actionDomains,action.kind))return null;
+    if(action.kind==='supply_catalog')return ['железо','B12'].includes(action.query)?{kind:action.kind,query:action.query}:null;
+    return {kind:action.kind};
+  }
+  function readTransfer(){try{return JSON.parse(sessionStorage.getItem(transferKey)||'null');}catch{return null;}}
+  function clearTransfer(){try{sessionStorage.removeItem(transferKey);}catch{}}
+  function writeTransfer(value){try{sessionStorage.setItem(transferKey,JSON.stringify(value));return sessionStorage.getItem(transferKey)===JSON.stringify(value);}catch{return false;}}
+  async function authBinding(){
+    const auth=currentAuth();
+    if(!auth.owner || !auth.proof || !window.crypto?.subtle)return null;
+    try{const bytes=await window.crypto.subtle.digest('SHA-256',new TextEncoder().encode(auth.proof));
+      return sameAuth(auth)?{owner:auth.owner,proof_digest:Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('')}:null;
+    }catch{return null;}
+  }
+  async function validTransfer(record){
+    if(!record || record.version!==1 || !Object.hasOwn(routes,record.from) || !Object.hasOwn(routes,record.to) || record.from===record.to || !returnViews[record.from].includes(record.view) || !['outbound','active','return'].includes(record.phase) || !Number.isFinite(record.created_at) || !Number.isFinite(record.expires_at) || record.created_at>Date.now() || record.expires_at<=Date.now() || record.expires_at-record.created_at>transferTtl || !cleanAction(record.action) || actionDomains[record.action.kind]!==record.to)return false;
+    const binding=await authBinding();
+    return !!binding && binding.owner===record.owner && binding.proof_digest===record.proof_digest;
+  }
+  function clearArrivalMarker(){
+    if(arrivalAction===null && arrivalReturn===null)return;
+    const url=new URL(location.href);url.searchParams.delete('progressor_action');url.searchParams.delete('progressor_return');
+    history.replaceState(history.state,'',url.pathname+url.search+url.hash);
+  }
+
   function element(tag, text, parent) {
     const node = document.createElement(tag);
     if (text !== undefined) node.textContent = text;
@@ -245,6 +283,11 @@
       #progressor-shell a[aria-disabled="true"]{opacity:.55}
       #progressor-context{position:absolute;top:100%;left:8px;right:8px;max-width:880px;margin:auto;background:#13213d;border:1px solid var(--border,#46516b);border-radius:0 0 14px 14px;padding:14px;box-shadow:0 10px 24px #0004;max-height:65vh;overflow:auto;overscroll-behavior:contain;line-height:1.5}
       #progressor-context[hidden]{display:none}
+      #progressor-transfer[hidden]{display:none}
+      #progressor-transfer{max-width:900px;margin:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:4px}
+      #progressor-transfer p{flex:1 1 180px;margin:0;overflow-wrap:anywhere;line-height:1.4}
+      #progressor-transfer button{border:1px solid #64748b;padding:8px 12px;white-space:normal;overflow-wrap:anywhere;text-align:center;max-width:100%}
+      #progressor-transfer button:focus-visible{outline:3px solid #60a5fa;outline-offset:2px}
       #progressor-context p{margin:8px 0} #progressor-context a{display:inline-flex;background:#2563eb;color:white;padding:0 12px}
       #progressor-inline-host{margin:12px 0;scroll-margin-top:calc(var(--progressor-bar-height) + 16px)}
       #progressor-inline-host[hidden]{display:none}
@@ -284,6 +327,77 @@
     shell.id = 'progressor-shell';
     const nav = element('nav', undefined, shell);
     nav.setAttribute('aria-label', 'Разделы Progressor');
+    const transferBar=element('section',undefined,shell);transferBar.id='progressor-transfer';transferBar.hidden=true;
+    transferBar.setAttribute('aria-label','Возврат после перехода');
+    const transferStatus=element('p','',transferBar);transferStatus.setAttribute('role','status');
+    let activeTransfer=null;
+    function transferMessage(message){
+      transferBar.hidden=false;transferStatus.textContent=message;
+      if(!activeTransfer && !transferBar.querySelector('[data-transfer-close]')){const close=element('button','Закрыть',transferBar);close.type='button';close.dataset.transferClose='';close.onclick=closeTransfer;}
+    }
+    function closeTransfer(){clearTransfer();activeTransfer=null;transferBar.hidden=true;transferBar.querySelectorAll('button').forEach(b=>b.remove());}
+    function showReturn(record){
+      activeTransfer=record;transferBar.querySelectorAll('button').forEach(b=>b.remove());
+      transferMessage('Открыт '+productNames[source]+'. Возврат доступен в этой вкладке 10 минут. Несохранённые формы не переносятся.');
+      const back=element('button','Вернуться в '+productNames[record.from],transferBar);back.type='button';back.dataset.progressorReturn='';
+      back.onclick=async()=>{
+        if(back.disabled)return;back.disabled=true;const revision=interactionRevision,auth=currentAuth();
+        try{
+          if(!await bootstrap(true) || !sameAuth(auth) || revision!==interactionRevision || !sessionValid() || !canNavigate() || !availableDomains.includes(record.from) || !await validTransfer(record))throw Error('unavailable');
+          if(revision!==interactionRevision || !sameAuth(auth) || !writeTransfer({...record,phase:'return'}))throw Error('unavailable');
+          location.assign(routes[record.from]+'?progressor_return=1');
+        }catch{transferMessage('Возврат временно недоступен. Текущий раздел продолжает работать. Можно открыть исходный продукт через верхнее меню.');back.disabled=false;}
+      };
+      const close=element('button','Убрать возврат',transferBar);close.type='button';close.onclick=closeTransfer;
+    }
+    async function waitForNative(revision){
+      const deadline=Date.now()+10000;
+      while(Date.now()<deadline){
+        if(revision!==interactionRevision)return false;
+        if(window.ProgressorDomain?.isReady?.())return true;
+        await new Promise(resolve=>setTimeout(resolve,100));
+      }
+      return false;
+    }
+    async function resumeTransfer(){
+      const record=readTransfer();
+      clearArrivalMarker();
+      if(!record && arrivalAction===null && arrivalReturn===null)return;
+      const revision=0,proof=currentAuth().proof;
+      if(!await bootstrap(true) || currentAuth().proof!==proof || !sessionValid() || !canNavigate() || !await validTransfer(record)){
+        clearTransfer();if(arrivalAction!==null || arrivalReturn!==null)transferMessage('Переход уже недоступен. Откройте нужный раздел обычным способом.');return;
+      }
+      const returning=arrivalReturn==='1' && arrivalAction===null && record.phase==='return' && record.from===source;
+      const arriving=arrivalReturn===null && arrivalAction===record.action.kind && record.phase==='outbound' && record.to===source;
+      if(!returning && !arriving){
+        if(arrivalAction!==null || arrivalReturn!==null){clearTransfer();transferMessage('Переход уже недоступен. Откройте нужный раздел обычным способом.');}
+        else if(record.to===source && record.phase==='active')showReturn(record);
+        return;
+      }
+      if(!availableDomains.includes(source)){clearTransfer();return;}
+      const auth=currentAuth();
+      const open=async expectedRevision=>{
+        if(!await waitForNative(expectedRevision) || expectedRevision!==interactionRevision || !sameAuth(auth) || !await validTransfer(record) || expectedRevision!==interactionRevision)return false;
+        try{return !!await (returning?window.ProgressorDomain.restoreView?.(record.view):window.ProgressorDomain.perform?.(record.action));}catch{return false;}
+      };
+      const handled=await open(revision);
+      if(!sameAuth(auth)){closeTransfer();return;}
+      if(returning){
+        clearTransfer();
+        if(!handled)transferMessage('Возврат отменён: текущий экран сохранён. Выберите нужный раздел в меню.');
+        return;
+      }
+      if(record.expires_at<=Date.now()){closeTransfer();transferMessage('Время возврата истекло. Текущий раздел продолжает работать.');return;}
+      record.phase='active';
+      if(!writeTransfer(record)){clearTransfer();transferMessage('Возврат недоступен в этой вкладке. Текущий раздел продолжает работать.');return;}
+      showReturn(record);
+      if(!handled){
+        transferStatus.textContent='Вы уже выбрали другой экран, или раздел ещё загружается. Продолжить переход можно явно.';
+        const retry=element('button','Открыть выбранный раздел',transferBar);retry.type='button';
+        retry.onclick=async()=>{if(retry.disabled)return;retry.disabled=true;const ok=await open(interactionRevision);if(ok)retry.remove();else{retry.disabled=false;transferStatus.textContent='Не удалось открыть раздел. Закончите текущую форму и попробуйте ещё раз.';}};
+      }
+    }
+    void resumeTransfer().catch(()=>{closeTransfer();transferMessage('Переход временно недоступен. Текущий раздел продолжает работать.');});
     const panel = element('section', undefined, shell);
     const connectionButton=element('button','Связь продуктов',panel);connectionButton.type='button';
     connectionButton.addEventListener('click',()=>document.dispatchEvent(new Event('progressor:open-connections')));
@@ -317,7 +431,28 @@
     if(new URLSearchParams(location.search).get('progressor_subscription')==='1'){panel.hidden=false;toggle.setAttribute('aria-expanded','true');ensureSubscriptions(panel);loadSubscriptions(panel).then(()=>selectProduct(source));}
     const height = () => document.documentElement.style.setProperty('--progressor-bar-height', `${Math.ceil(shell.getBoundingClientRect().height)}px`);
     height(); new ResizeObserver(height).observe(shell);
-    let loading=false, lastContext=null, panelSignature='', inlineSignature='',seenObserver=null,seenCheck=()=>{},initialContextRetries=0;
+    let loading=false, lastContext=null, contextAuth=null, reviewConfirmation=null, panelSignature='', inlineSignature='',seenObserver=null,seenCheck=()=>{},initialContextRetries=0;
+    function hintStatus(card,message){let node=card.querySelector('[role="status"]');if(!node){node=element('p','',card);node.setAttribute('role','status');}node.textContent=message;}
+    async function reviewHint(button,card,hint,signature,auth){
+      if(button.disabled)return;
+      button.disabled=true;const revision=interactionRevision;
+      const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),5000);
+      try{
+        if(!sameAuth(auth))throw Error('changed');
+        const response=await window.fetch('/progressor/api/v1/me/hints/reviewed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target:source,delivery_key:hint.delivery_key}),signal:controller.signal,cache:'no-store'});
+        if(response.status!==200)throw Error('unavailable');
+        const ack=await response.json();
+        if(ack.reviewed!==true || ack.target!==source || ack.delivery_key!==hint.delivery_key || typeof ack.reviewed_at!=='number' || !Number.isFinite(ack.reviewed_at) || ack.reviewed_at<=0)throw Error('invalid_ack');
+        // A delayed receipt belongs to this exact card and account only.
+        if(!sameAuth(auth) || !card.isConnected || inlineSignature!==signature || lastContext?.inline_hint?.delivery_key!==hint.delivery_key)return;
+        seenObserver?.disconnect();
+        reviewConfirmation={delivery_key:hint.delivery_key,auth,focus:revision===interactionRevision};
+        lastContext.inline_hint=null;lastContext.offer_preview=null;inlineSignature='';
+        renderInline();
+      }catch{
+        if(sameAuth(auth) && card.isConnected && inlineSignature===signature)hintStatus(card,'Не удалось подтвердить проверку. Цель, план и дозы не менялись. Попробуйте ещё раз.');
+      }finally{clearTimeout(timeout);button.disabled=false;if(!sameAuth(auth))renderInline();}
+    }
     const acknowledged=new Set();
     function observeHint(card,hint) {
       seenObserver?.disconnect();seenObserver=null;
@@ -347,15 +482,34 @@
     document.addEventListener('click',()=>setTimeout(()=>seenCheck(),150));
     document.addEventListener('visibilitychange',()=>seenCheck());
     async function performAction(action) {
-      if (!action) return;
-      if (action.kind==='bundle') return window.Progressor.openBundle();
-      const handled=await window.ProgressorDomain?.perform?.(action);
-      if (handled) return;
-      if ((action.kind==='open_food' || action.kind==='food_log') && await bootstrap(true) && canNavigate() && availableDomains.includes('food')) location.assign(routes.food);
+      if(action?.kind==='bundle'){await window.Progressor.openBundle();return true;}
+      const purpose=cleanAction(action);if(!purpose)return false;
+      const domain=actionDomains[purpose.kind];
+      if(domain===source)return !!await window.ProgressorDomain?.perform?.(purpose);
+      const view=window.ProgressorDomain?.captureView?.();
+      if(!returnViews[source].includes(view))return false;
+      const revision=interactionRevision,proof=currentAuth().proof;
+      if(!await bootstrap(true) || currentAuth().proof!==proof || revision!==interactionRevision || !sessionValid() || !canNavigate() || !availableDomains.includes(domain))return false;
+      const binding=await authBinding();
+      if(!binding || revision!==interactionRevision)return false;
+      const now=Date.now(),record={version:1,...binding,from:source,to:domain,action:purpose,view,created_at:now,expires_at:now+transferTtl,phase:'outbound'};
+      if(!writeTransfer(record)){clearTransfer();return false;}
+      location.assign(routes[domain]+'?progressor_action='+purpose.kind);
+      return true;
     }
     function renderInline() {
       const host=window.ProgressorDomain?.hintHost?.();
       if (!host) return;
+      if(contextAuth && !sameAuth(contextAuth)){host.hidden=true;seenObserver?.disconnect();reviewConfirmation=null;return;}
+      if(!window.ProgressorDomain?.eligible?.(lastContext)){host.hidden=true;seenObserver?.disconnect();return;}
+      if(reviewConfirmation){
+        if(!sameAuth(reviewConfirmation.auth)){reviewConfirmation=null;}
+        else if(!lastContext?.inline_hint || lastContext.inline_hint.delivery_key===reviewConfirmation.delivery_key){
+          seenObserver?.disconnect();host.hidden=false;
+          if(!host.querySelector('[data-review-confirmed]')){host.replaceChildren();const confirmation=element('p','Проверено. Цель, план и дозы не менялись.',host);confirmation.dataset.reviewConfirmed='';confirmation.setAttribute('role','status');confirmation.setAttribute('tabindex','-1');if(reviewConfirmation.focus)confirmation.focus({preventScroll:true});}
+          return;
+        }else reviewConfirmation=null;
+      }
       const isOffer=!lastContext?.inline_hint && !!lastContext?.offer_preview;
       const hint=lastContext?.inline_hint || lastContext?.offer_preview;
       const eligible=hint && window.ProgressorDomain?.eligible?.(lastContext);
@@ -364,6 +518,7 @@
       const signature=JSON.stringify(hint);
       if (inlineSignature===signature && host.firstChild) {if(!isOffer) observeHint(host.firstChild,hint);return;}
       inlineSignature=signature; host.replaceChildren();
+      const cardAuth=contextAuth||currentAuth();
       const card=element('aside',undefined,host); card.className='progressor-hint'; card.setAttribute('aria-label',hint.title);
       if(isOffer){card.dataset.kind='locked-example';element('small','Возможность общей подписки',card);}
       element('strong',hint.title,card); element('p',hint.message,card);
@@ -375,7 +530,16 @@
       for (const action of [hint.action,hint.secondary_action].filter(a=>a && (!a.targets || a.targets.includes(source)))) {
         const button=element('button',action.label,actions); button.type='button';
         if(action===hint.action) button.dataset.primary='1';
-        button.addEventListener('click',async event=>{if(action.kind==='bundle')event.stopPropagation();button.disabled=true;try{await performAction(action);}finally{button.disabled=false;}});
+        button.addEventListener('click',async event=>{
+          if(button.disabled)return;if(action.kind==='bundle')event.stopPropagation();button.disabled=true;
+          try{if(!await performAction(action))hintStatus(card,'Не удалось открыть раздел. Текущий экран сохранён; закончите форму или попробуйте позже.');}
+          catch{hintStatus(card,'Переход временно недоступен. Текущий раздел продолжает работать.');}
+          finally{button.disabled=false;}
+        });
+      }
+      if(!isOffer && hint.reviewable===true && typeof hint.delivery_key==='string' && hint.delivery_key){
+        const reviewed=element('button','Проверил, всё подходит',actions);reviewed.type='button';reviewed.dataset.reviewHint='';
+        reviewed.addEventListener('click',()=>reviewHint(reviewed,card,hint,signature,cardAuth));
       }
         const details=element('details',undefined,card); element('summary',isOffer?'Как это появится':'Почему эта подсказка',details); element('p',hint.details,details); element('p',isOffer?'Крестик скрывает предложения этого раздела на неделю.':'Крестик скрывает подсказки этого раздела на неделю.',details);
         const dismiss=element('button','×',card); dismiss.type='button'; dismiss.className='progressor-dismiss'; dismiss.title=isOffer?'Скрыть предложение на неделю':'Скрыть подсказки на неделю'; dismiss.setAttribute('aria-label',dismiss.title);
@@ -384,6 +548,7 @@
         try {
           const response=await window.fetch('/progressor/api/v1/me/'+(isOffer?'offers':'hints')+'/dismiss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target:source})});
           if(!response.ok) throw new Error('unavailable');
+          if(!sameAuth(cardAuth) || !card.isConnected || inlineSignature!==signature)return;
           if(isOffer) lastContext.offer_preview=null; else {lastContext.inline_hint=null;lastContext.offer_preview=null;} host.hidden=true; inlineSignature='';
         } catch (_) { let error=card.querySelector('[role="status"]'); if(!error){error=element('p',undefined,card);error.setAttribute('role','status');} error.textContent='Не удалось скрыть. Попробуйте ещё раз.'; }
         finally {dismiss.disabled=false;}
@@ -398,9 +563,12 @@
       const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 2500);
       try {
         if (!await bootstrap()) throw new Error('unavailable');
+        const requestAuth=currentAuth();
         const response = await window.fetch('/progressor/api/v1/me/context?target=' + source, {signal: controller.signal, cache: 'no-store'});
         if (!response.ok) throw new Error('unavailable');
         const context = await response.json();
+        if(!sameAuth(requestAuth))return;
+        contextAuth=requestAuth;
         availableDomains = context.enabled_domains || [];
         status.textContent = context.memberships.length ? `Личный контекст. Подключены: ${context.memberships.map(s => ({gym:'Gym',food:'Food',supply:'Supply'}[s])).join(', ')}.` : 'В этом разделе сейчас нет доступного общего контекста.';
         lastContext=context; renderInline();
@@ -431,7 +599,7 @@
     }
     await loadContext();
     await loadSubscriptions(panel);
-    setInterval(() => { if (document.visibilityState === 'visible') {loadContext();loadSubscriptions(panel);} }, 30000);
+    setInterval(() => { if(activeTransfer && (activeTransfer.expires_at<=Date.now() || activeTransfer.owner!==currentAuth().owner))closeTransfer();if (document.visibilityState === 'visible') {loadContext();loadSubscriptions(panel);} }, 30000);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) loadContext(); });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, {once:true}); else mount();
