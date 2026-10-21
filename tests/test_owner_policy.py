@@ -10,6 +10,7 @@ import time
 import unittest
 from contextlib import closing
 from datetime import datetime,timedelta,timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from unittest.mock import patch
 
@@ -74,8 +75,12 @@ class OwnerPolicy(unittest.TestCase):
             db.execute('INSERT INTO user_health_profile VALUES(55,79,180,?,?,?,1990,?,3,180)',(stamp,stamp,'female','any'))
             db.execute('UPDATE supplement_day_state SET day=?,created_at=?',(self.now.date().isoformat(),stamp))
             db.execute('INSERT INTO lab_reports VALUES(1,55,?,?,?,?)',(self.now.date().isoformat(),'manual',stamp,stamp))
+        # Food's journal day belongs to the same saved instant in its native
+        # Europe/Moscow source timezone, including UTC/Moscow date boundaries.
+        meal_recorded=self.now-timedelta(minutes=2)
+        meal_day=meal_recorded.astimezone(ZoneInfo('Europe/Moscow')).date().isoformat()
         with closing(sqlite3.connect(self.paths['food'])) as db,db:
-            db.execute('INSERT INTO meals VALUES(99,?,?,500,30,10,60,?,0)',(USER,self.now.date().isoformat(),(self.now-timedelta(minutes=2)).isoformat()))
+            db.execute('INSERT INTO meals VALUES(99,?,?,500,30,10,60,?,0)',(USER,meal_day,meal_recorded.isoformat()))
         self.metadata()
         self.store=Store(self.root/'core.db');self.store.owner_policy_gate=self.gate
         self.sync()

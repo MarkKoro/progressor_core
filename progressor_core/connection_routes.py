@@ -105,6 +105,20 @@ def install(app,engine,claims):
             return await run_in_threadpool(read,engine(request).store,uid)
         except (ValueError,KeyError,TypeError):raise HTTPException(409,'Account action rejected')
 
+    @app.post('/internal/v1/connections/next-meal')
+    async def next_meal(request:Request):
+        source,body=await private(request)
+        if source!='food':raise HTTPException(403,'Food owner only')
+        from .next_meal import view,change
+        try:
+            if (set(body) not in ({'user_id','data_reset_revision'},{'user_id','data_reset_revision','operation'})
+                    or type(body.get('data_reset_revision')) is not int or not 0<=body['data_reset_revision']<2**63):raise ValueError('invalid_body')
+            uid=subject(body['user_id'])
+            if 'operation' in body:return await run_in_threadpool(change,engine(request).store,uid,body['operation'],expected_reset=body['data_reset_revision'])
+            return await run_in_threadpool(view,engine(request).store,uid,expected_reset=body['data_reset_revision'])
+        except (ValueError,KeyError,TypeError):
+            raise HTTPException(409,'Выбор или настройки изменились. Обновите варианты; съеденная еда не менялась.')
+
     @app.post('/internal/v1/connections/weekly')
     async def private_weekly(request:Request):
         _,body=await private(request)

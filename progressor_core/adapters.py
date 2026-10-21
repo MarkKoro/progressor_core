@@ -170,6 +170,10 @@ def food(db):
     users = {row['telegram_id']: dict(row) for row in db.execute('SELECT * FROM users')}
     members = [{'local_id': str(uid), 'user_id': subject(uid)} for uid in users]
     entities, days = [], {}
+    resets={}
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='progressor_food_resets'").fetchone():
+        resets={row['user_id']:row['revision'] for row in db.execute('SELECT * FROM progressor_food_resets')}
+        if any(type(value) is not int or not 0<=value<2**63 for value in resets.values()):raise ValueError('invalid_food_reset_revision')
     trial_limit=6
     if db.execute("SELECT 1 FROM sqlite_master WHERE name='app_settings'").fetchone():
         row=db.execute("SELECT value FROM app_settings WHERE key='trial_limit'").fetchone()
@@ -191,7 +195,7 @@ def food(db):
     for uid, user in users.items():
         paid=instant(user['premium_until']) if user.get('is_premium') and user.get('premium_until') else None
         trial=instant(user['trial_until']) if user.get('trial_until') and (user.get('trial_used_count') or 0)<trial_limit else None
-        entities.append(entity('profile:' + str(uid), uid, 'profile.updated', instant(user['created_at'], tz), timezone=tz, timezone_basis='legacy_server_timezone',paid_until=paid,access_basis='native_subscription',native_trial_until=trial))
+        entities.append(entity('profile:' + str(uid), uid, 'profile.updated', instant(user['created_at'], tz), timezone=tz, timezone_basis='legacy_server_timezone',paid_until=paid,access_basis='native_subscription',native_trial_until=trial,data_reset_revision=resets.get(uid,0)))
     meal_columns={r['name'] for r in db.execute('PRAGMA table_info(meals)')}
     raw_column=',m.raw_json' if 'raw_json' in meal_columns else ''
     for row in db.execute('SELECT m.id,m.user_id,m.date,m.kcal,m.protein,m.fat,m.carbs,m.created_at,m.version'+raw_column+' FROM meals m JOIN users u ON u.telegram_id=m.user_id'):

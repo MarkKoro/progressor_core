@@ -42,7 +42,8 @@ class OwnerPolicyUpdater(unittest.TestCase):
         self.addCleanup(self.stack.close)
         for name, value in {'CORE': self.core, 'STATE': self.core / 'updater/state.json',
                             'UPDATERS': self.core / 'updater', 'TRANSACTIONS': self.root / 'transactions',
-                            'SYSTEMD': self.root / 'systemd', 'OWNER_POLICY_GATE': self.gate}.items():
+                            'SYSTEMD': self.root / 'systemd', 'OWNER_POLICY_GATE': self.gate,
+                            'MEAL_CHOICE_GATE':self.root/'next-meal-v1-ready'}.items():
             self.stack.enter_context(patch.object(up, name, value))
         self.stack.enter_context(patch.object(up, 'emit'))
         self.stack.enter_context(patch.object(up, 'atomic_json', side_effect=self.write_state))
@@ -291,10 +292,12 @@ class PersistentGateBackups(unittest.TestCase):
         self.root = Path(temporary.name)
         self.financial = self.root / 'bundle-v2-ready'
         self.owner = self.root / 'owner-consent-v1-ready'
+        self.meal = self.root / 'next-meal-v1-ready'
         self.archive = self.root / 'code-config.tar'
         stack = ExitStack()
         self.addCleanup(stack.close)
         stack.enter_context(patch.object(up, 'OWNER_POLICY_GATE', self.owner))
+        stack.enter_context(patch.object(up, 'MEAL_CHOICE_GATE', self.meal))
         stack.enter_context(patch.object(up, 'DBS', {'core': self.root / 'core.sqlite3'}))
 
     def write_gates(self):
@@ -321,13 +324,14 @@ class PersistentGateBackups(unittest.TestCase):
                     self.assertEqual(stream.read(), path.read_bytes())
         manifest = up.persistent_gate_manifest(gates)
         json.dumps(manifest)
-        self.assertTrue(all(value['present'] for value in manifest.values()))
+        self.assertTrue(manifest[self.financial.name]['present']);self.assertTrue(manifest[self.owner.name]['present'])
+        self.assertFalse(manifest[self.meal.name]['present'])
         self.assertTrue(all('content' not in value for value in manifest.values()))
 
     def test_absent_gates_are_explicit_and_valid_before_activation(self):
         gates = up.capture_persistent_gates()
         self.assertEqual({name: record['present'] for name, record in gates.items()},
-                         {'bundle-v2-ready': False, 'owner-consent-v1-ready': False})
+                         {'bundle-v2-ready': False, 'owner-consent-v1-ready': False,'next-meal-v1-ready':False})
         self.archive_gates(gates)
         with tarfile.open(self.archive) as archive:
             up.verify_persistent_gates(archive, gates)

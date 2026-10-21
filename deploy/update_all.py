@@ -35,6 +35,8 @@ DROPIN = 'zz-progressor-update-all.conf'
 UPDATERS = CORE / 'updater'
 OWNER_POLICY_GATE = Path('/var/lib/progressor/owner-consent-v1-ready')
 OWNER_POLICY_UPDATER_PROTOCOL = 1
+MEAL_CHOICE_GATE = Path('/var/lib/progressor/next-meal-v1-ready')
+MEAL_CHOICE_UPDATER_PROTOCOL = 1
 REPOS = {
     'gym': {'path': Path('/srv/gym_diary_prod'), 'repo': 'gym_diary_bot', 'title': 'Gym'},
     'food': {'path': Path('/srv/food_bot'), 'repo': 'food_bot', 'title': 'Food'},
@@ -160,11 +162,37 @@ def check_owner_policy_epoch(candidates):
     check_owner_policy_release(candidates['core'])
 
 
+def meal_choice_epoch_required():
+    try:MEAL_CHOICE_GATE.lstat()
+    except FileNotFoundError:return False
+    except OSError as error:raise UpdateError('meal_choice_gate_unavailable') from error
+    return True
+
+
+def meal_choice_markers(name):
+    return (('progressor_core/next_meal.py','NEXT_MEAL_PROTOCOL'),
+            ('deploy/update_all.py','MEAL_CHOICE_UPDATER_PROTOCOL')) if name=='core' else (('db.py','FOOD_RESET_PROTOCOL'),)
+
+
+def check_meal_choice_release(path,name):
+    for relative,marker in meal_choice_markers(name):
+        if owner_policy_file_constant(Path(path)/relative,marker)<1:
+            raise UpdateError('incompatible_meal_choice_protocol:'+name+':'+marker)
+
+
+def check_meal_choice_epoch(candidates):
+    if not meal_choice_epoch_required():return
+    for name in ('core','food'):
+        if not candidates.get(name):raise UpdateError('missing_meal_choice_candidate:'+name)
+        check_meal_choice_release(candidates[name],name)
+
+
 def capture_persistent_gates():
     """Recovery content only; ordinary code rollback never restores these gates."""
     result = {}
     paths = {'bundle-v2-ready': DBS['core'].parent / 'bundle-v2-ready',
-             'owner-consent-v1-ready': OWNER_POLICY_GATE}
+             'owner-consent-v1-ready': OWNER_POLICY_GATE,
+             'next-meal-v1-ready': MEAL_CHOICE_GATE}
     for name, path in paths.items():
         record = {'path': str(path), 'archive_name': 'var/lib/progressor/' + name, 'present': False}
         try:
@@ -499,6 +527,7 @@ class Updater:
 
     def check_helpers(self):
         check_owner_policy_epoch(self.candidates)
+        check_meal_choice_epoch(self.candidates)
         check_financial_epoch(self.candidates,DBS['core'])
         for name in ('gym', 'food', 'supply'):
             mapping = {**HELPERS, **({'workout_metrics.py': 'progressor_workout_metrics.py'} if name == 'gym' else {})}
@@ -736,6 +765,7 @@ class Updater:
 
     def prepare_switch(self):
         check_owner_policy_epoch(self.candidates)
+        check_meal_choice_epoch(self.candidates)
         affected = [u for u in self.state['units'] if UNIT_SPECS[u][0] in self.changed or
                     u == 'progressor_core.service' and self.changed]
         self.state['affected'] = affected
@@ -776,6 +806,7 @@ class Updater:
 
     def switch(self):
         check_owner_policy_epoch(self.candidates)
+        check_meal_choice_epoch(self.candidates)
         self.save('switching', switch_started=True)
         for name in ('core', 'gym', 'food', 'supply'):
             info = self.state['repositories'][name]
@@ -805,6 +836,9 @@ class Updater:
         if 'core' not in self.changed: return
         if owner_policy_epoch_required():
             check_owner_policy_release(self.state['core_after'])
+        if meal_choice_epoch_required():
+            check_meal_choice_release(self.state['core_after'],'core')
+            check_meal_choice_release(REPOS['food']['path'],'food')
         for file in ('update_all.py', 'update_progressor.py'):
             source = Path(self.state['core_after']) / 'deploy' / file
             if not source.is_file(): raise UpdateError('missing_tested_updater:' + file)
@@ -814,6 +848,8 @@ class Updater:
         info = self.state['repositories'][name]
         if name == 'core' and owner_policy_epoch_required():
             self.check_owner_policy_repository_rollback(info)
+        if name in ('core','food') and meal_choice_epoch_required():
+            self.check_meal_choice_repository_rollback(name,info)
         head = git(name, 'rev-parse', 'HEAD')
         if head not in {info['before'], info['target']}: raise UpdateError('concurrent_git_change_prevents_recovery:' + name)
         paths = []
@@ -864,6 +900,10 @@ class Updater:
             check_owner_policy_release(current)
             if owner_policy_file_constant(UPDATERS / 'update_all.py', 'OWNER_POLICY_UPDATER_PROTOCOL') < 1:
                 raise UpdateError('incompatible_owner_policy_current:updater')
+            if meal_choice_epoch_required():
+                check_meal_choice_epoch({'core':current,'food':REPOS['food']['path']})
+                if owner_policy_file_constant(UPDATERS/'update_all.py','MEAL_CHOICE_UPDATER_PROTOCOL')<1:
+                    raise UpdateError('incompatible_meal_choice_current:updater')
         except (OSError, UpdateError) as error:
             errors.append(str(error))
             self.save(recovery_errors=errors, database_restored=False)
@@ -877,8 +917,49 @@ class Updater:
         self.save(health=report)
         raise UpdateError('recovery_requires_attention_owner_policy_protocol') from reason
 
+    def check_meal_choice_repository_rollback(self,name,info):
+        for path,marker in meal_choice_markers(name):
+            code,source=command(['git','-C',REPOS[name]['path'],'show',info['before']+':'+path],allow_failure=True)
+            if code or owner_policy_constant(source,marker)<1:
+                raise UpdateError('incompatible_meal_choice_rollback:'+name)
+
+    def check_meal_choice_rollback(self):
+        if not meal_choice_epoch_required():return
+        check_meal_choice_release(self.state['core_before'],'core')
+        for name in ('core','food'):
+            if name in self.state['attempted_repositories']:
+                self.check_meal_choice_repository_rollback(name,self.state['repositories'][name])
+            elif name=='food':check_meal_choice_release(REPOS['food']['path'],'food')
+        if 'update_all.py' in self.state['old_updaters']:
+            old=self.state['old_updaters']['update_all.py']
+            try:version=owner_policy_constant(base64.b64decode(old,validate=True),'MEAL_CHOICE_UPDATER_PROTOCOL') if old else 0
+            except (ValueError,TypeError):version=0
+            if version<1:raise UpdateError('incompatible_meal_choice_rollback:updater')
+
+    def retain_meal_choice_current(self,reason):
+        errors=[str(reason)]
+        try:
+            current=(CORE/'current').resolve(strict=True)
+            check_meal_choice_release(current,'core')
+            check_meal_choice_release(REPOS['food']['path'],'food')
+            if owner_policy_file_constant(UPDATERS/'update_all.py','MEAL_CHOICE_UPDATER_PROTOCOL')<1:
+                raise UpdateError('incompatible_meal_choice_current:updater')
+            if owner_policy_epoch_required():
+                check_owner_policy_release(current)
+                if owner_policy_file_constant(UPDATERS/'update_all.py','OWNER_POLICY_UPDATER_PROTOCOL')<1:
+                    raise UpdateError('incompatible_owner_policy_current:updater')
+        except (OSError,UpdateError) as error:
+            errors.append(str(error));self.save(recovery_errors=errors,database_restored=False)
+            raise UpdateError('recovery_requires_attention_meal_choice_protocol') from reason
+        self.thaw_worker()
+        self.save(recovery_errors=errors,meal_choice_retained_core=str(current),database_restored=False)
+        self.start_units();self.save(health=self.wait_health())
+        raise UpdateError('recovery_requires_attention_meal_choice_protocol') from reason
+
     def rollback(self):
         self.save('rolling_back')
+        try:self.check_meal_choice_rollback()
+        except UpdateError as error:self.retain_meal_choice_current(error)
         try:
             self.check_owner_policy_rollback()
         except UpdateError as error:

@@ -99,3 +99,14 @@ while the same explicit strict fixture still refuses the unknown owner. Optional
 next-meal isolation and exception cleanup are covered too. Missing runner code
 refuses the candidate test command. This keeps later updates usable after strict
 activation without adding a production test bypass or weakening reader guards.
+
+Отдельный план следующей еды включается только после завершённой поставки
+совместимых Core, Food и updater: `next-meal-v1-ready` требует
+NEXT_MEAL_PROTOCOL>=1, FOOD_RESET_PROTOCOL>=1 и MEAL_CHOICE_UPDATER_PROTOCOL>=1.
+Этот третий постоянный маркер также входит в private gate collector с точными
+bytes/SHA256/mode/present/absent и проверкой реального tar. Он не платный grant
+и не согласие; обычный откат кода его не удаляет. После его активации возврат
+к Food purger без reset epoch запрещён, даже если старый Food запускается.
+Несовместимый fallback сохраняет проверенный current/runtime/updater и требует
+внимания вместо восстановления старого кода. Порядок активации под обеими
+блокировками и повторной backup/restore описан в [NEXT_MEAL_CHOICES.md](NEXT_MEAL_CHOICES.md).

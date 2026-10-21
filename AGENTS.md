@@ -59,3 +59,12 @@ subprocess redirects reader default readiness paths before discovery; explicit
 strict-mode fixture gates still apply. Application readers never use a test
 environment switch. Do not let host owner/next-meal gates select the semantics of
 legacy synthetic test databases. Updater fixtures must own their gate paths too.
+
+Read docs/NEXT_MEAL_CHOICES.md before planned meals, canonical preference revisions, Food clear-data epochs or their rollback. A choice is never consumed food. Keep the one Core preferences writer, monotonic revision metadata, explicit owner/proof guards, source/trial/freshness and the independent next-meal-v1-ready recovery gate. Do not activate it before compatible updater/current/fallback and actual running Food services are verified under both updater locks; never roll back to an old Food purger after activation.
+
+
+## Verified third journey package — 2026-10-22
+
+Preserve the explicit Food next-meal intent boundary in docs/NEXT_MEAL_CHOICES.md: one canonical Core preferences writer and planned choice, monotonic reset/revision receipts, no automatic meal/macronutrient writes, no provider call. Keep the explicit offline deploy/run_core_checks.py entry before test discovery; host readiness state must never change synthetic fixtures. In positive Food meal fixtures derive journal date from the same saved instant in Europe/Moscow, including the 21:00–24:00 UTC date-boundary window; saved time does not prove consumption time.
+
+The exact combined source B passed 863 Linux tests through composed byte-verified runs (Core388 B; unchanged Food147/Gym239/Supply89 A), plus a fresh 58-case browser regression and one separate coexistence scenario on runtime-identical source A. Optional-tour JS17 is a separate pure-VM check. Physical Telegram, real provider/payment and human UX outcomes are not established by these gates. Read the release WORK_LOG entry before rollout; preserve all three gate contracts and verify compatible current/updater/fallback before any next-meal activation under both updater locks.

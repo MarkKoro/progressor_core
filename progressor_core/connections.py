@@ -15,6 +15,27 @@ from .contracts import SOURCES, canonical, digest, subject
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS connection_preferences(
  user_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,body TEXT NOT NULL,updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS connection_preference_versions(
+ user_id TEXT PRIMARY KEY,revision INTEGER NOT NULL);
+INSERT INTO connection_preference_versions SELECT user_id,revision FROM connection_preferences WHERE 1
+ ON CONFLICT(user_id) DO UPDATE SET revision=max(revision,excluded.revision);
+CREATE TRIGGER IF NOT EXISTS connection_preferences_insert_version AFTER INSERT ON connection_preferences BEGIN
+ INSERT INTO connection_preference_versions VALUES(NEW.user_id,NEW.revision)
+ ON CONFLICT(user_id) DO UPDATE SET revision=max(revision+1,NEW.revision);
+ UPDATE connection_preferences SET revision=(SELECT revision FROM connection_preference_versions WHERE user_id=NEW.user_id)
+ WHERE user_id=NEW.user_id AND revision!=(SELECT revision FROM connection_preference_versions WHERE user_id=NEW.user_id);
+END;
+CREATE TRIGGER IF NOT EXISTS connection_preferences_update_version AFTER UPDATE ON connection_preferences
+ WHEN NEW.revision<=OLD.revision OR NEW.revision!=(SELECT revision FROM connection_preference_versions WHERE user_id=NEW.user_id) BEGIN
+ INSERT INTO connection_preference_versions VALUES(NEW.user_id,NEW.revision)
+ ON CONFLICT(user_id) DO UPDATE SET revision=max(revision+1,NEW.revision);
+ UPDATE connection_preferences SET revision=(SELECT revision FROM connection_preference_versions WHERE user_id=NEW.user_id)
+ WHERE user_id=NEW.user_id AND revision!=(SELECT revision FROM connection_preference_versions WHERE user_id=NEW.user_id);
+END;
+CREATE TRIGGER IF NOT EXISTS connection_preferences_delete_version AFTER DELETE ON connection_preferences BEGIN
+ INSERT INTO connection_preference_versions VALUES(OLD.user_id,OLD.revision+1)
+ ON CONFLICT(user_id) DO UPDATE SET revision=max(revision,OLD.revision)+1;
+END;
 CREATE TABLE IF NOT EXISTS connection_commands(
  id TEXT NOT NULL,user_id TEXT NOT NULL,source TEXT NOT NULL,body TEXT NOT NULL,
  created_at REAL NOT NULL,expires_at REAL NOT NULL,status TEXT NOT NULL,result TEXT,
@@ -39,13 +60,18 @@ DEFAULTS = {'sources':{s:True for s in SOURCES},'hints':True,'notifications':Tru
 FOOD_GROUPS = ('fish','shellfish','meat','poultry','eggs','dairy','soy','nuts','gluten','sesame')
 
 def preferences(store, user_id, now=None):
-    stamp=time.time() if now is None else now
     with store.connection() as db:
-        row=db.execute('SELECT * FROM connection_preferences WHERE user_id=?',(subject(user_id),)).fetchone()
+        return preferences_from_connection(db,user_id,now)
+
+def preferences_from_connection(db, user_id, now=None):
+    """Canonical preferences within an existing owner transaction as needed."""
+    stamp=time.time() if now is None else now
+    row=db.execute('SELECT * FROM connection_preferences WHERE user_id=?',(subject(user_id),)).fetchone()
+    version=db.execute('SELECT revision FROM connection_preference_versions WHERE user_id=?',(subject(user_id),)).fetchone()
     data=copy.deepcopy(DEFAULTS)
     if row: data.update(json.loads(row['body']))
     paused=bool(data['paused'] and (data['pause_until'] is None or data['pause_until']>stamp))
-    return {**data,'revision':row['revision'] if row else 0,'updated_at':row['updated_at'] if row else None,
+    return {**data,'revision':version['revision'] if version else (row['revision'] if row else 0),'updated_at':row['updated_at'] if row else None,
             'rest_active':paused,'subscription_time_continues':True}
 
 def save_preferences(store,user_id,patch,expected_revision):
@@ -71,7 +97,8 @@ def save_preferences(store,user_id,patch,expected_revision):
     with store.connection() as db:
         db.execute('BEGIN IMMEDIATE')
         old=db.execute('SELECT * FROM connection_preferences WHERE user_id=?',(uid,)).fetchone()
-        if (old['revision'] if old else 0)!=expected_revision:raise ValueError('preferences_changed')
+        version=db.execute('SELECT revision FROM connection_preference_versions WHERE user_id=?',(uid,)).fetchone()
+        if (version['revision'] if version else (old['revision'] if old else 0))!=expected_revision:raise ValueError('preferences_changed')
         body=copy.deepcopy(DEFAULTS)
         if old:body.update(json.loads(old['body']))
         if patch.get('weight_notifications') is True and not body['weight_notifications']:

@@ -39,6 +39,8 @@ class Store:
             db.executescript(CONNECTION_SCHEMA)
             from .owner_policy import SCHEMA as OWNER_POLICY_SCHEMA
             db.executescript(OWNER_POLICY_SCHEMA)
+            from .next_meal import SCHEMA as NEXT_MEAL_SCHEMA
+            db.executescript(NEXT_MEAL_SCHEMA)
             if db.execute('SELECT max(version) FROM schema_version').fetchone()[0] != 1:
                 raise RuntimeError('unsupported_core_schema')
 
@@ -127,6 +129,13 @@ class Store:
                 db.execute('INSERT INTO adapter_state VALUES(?,?,?,?,?,?) ON CONFLICT(source,entity_id) DO UPDATE SET revision=excluded.revision,hash=excluded.hash,deleted=excluded.deleted', (source, entity_id, user_id, revision, content_hash, int(item is None)))
                 changed += 1
             stamp = time.time()
+            if source=='food':
+                from .next_meal import reconcile_resets
+                reconcile_resets(db,snapshot)
+                # Only a successful complete owner snapshot proves deletion.
+                # Expiry, source-off and failed polls do not remove a choice.
+                db.execute("DELETE FROM next_meal_choices WHERE NOT EXISTS (SELECT 1 FROM memberships m WHERE m.user_id=next_meal_choices.user_id AND m.source='food' AND m.active=1)")
+                db.execute("DELETE FROM next_meal_receipts WHERE NOT EXISTS (SELECT 1 FROM memberships m WHERE m.user_id=next_meal_receipts.user_id AND m.source='food' AND m.active=1)")
             db.execute("INSERT INTO source_state VALUES(?,'ok',?,?,0,0,NULL) ON CONFLICT(source) DO UPDATE SET status='ok',observed_at=excluded.observed_at,last_success=excluded.last_success,failures=0,retry_at=0,reason=NULL", (source, stamp, stamp))
             if source=='gym':
                 from .connection_changes import revoke_coach_permissions

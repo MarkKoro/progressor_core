@@ -33,10 +33,9 @@ class CoordinatedUpdate(unittest.TestCase):
                             'UPDATERS': self.core / 'updater', 'TRANSACTIONS': self.root / 'transactions',
                             'SYSTEMD': self.root / 'systemd', 'BACKUPS': self.root / 'backups',
                             'RUNTIMES': self.root / 'runtimes',
-                            'OWNER_POLICY_GATE': self.root / 'owner-consent-v1-ready'}.items():
+                            'OWNER_POLICY_GATE':self.root/'owner-consent-v1-ready',
+                            'MEAL_CHOICE_GATE':self.root/'next-meal-v1-ready'}.items():
             self.stack.enter_context(patch.object(up, name, value))
-        if hasattr(up, 'MEAL_CHOICE_GATE'):
-            self.stack.enter_context(patch.object(up, 'MEAL_CHOICE_GATE', self.root / 'next-meal-v1-ready'))
         self.repos = {n: {**s, 'path': self.root / 'repositories' / n} for n, s in up.REPOS.items()}
         self.stack.enter_context(patch.object(up, 'REPOS', self.repos))
         self.stack.enter_context(patch.object(up,'DBS',{name:self.root/(name+'.sqlite3') for name in up.DBS}))
@@ -287,7 +286,6 @@ class CoordinatedUpdate(unittest.TestCase):
         with patch.dict('os.environ', {'PROGRESSOR_GYM_BOT_TOKEN': 'live', 'DB_PATH': '/live/db'}):
             env = up.offline_environment(self.root)
         self.assertNotIn('PROGRESSOR_GYM_BOT_TOKEN', env); self.assertNotEqual(env['DB_PATH'], '/live/db')
-
 
     def test_core_contract_subprocess_uses_isolated_runner(self):
         source = self.root / 'candidate-core'; (source / 'tests').mkdir(parents=True)

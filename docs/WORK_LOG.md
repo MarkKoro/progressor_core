@@ -156,3 +156,37 @@ failed (`owner_sync` returned zero commands), proving that host readiness could
 break future updater tests. Added a Core-only explicit test runner, test-owned
 updater gates and causal regressions; production reader code/gates are untouched.
 Linux full-candidate verification is required before publishing this correction.
+
+## D05 — Explicit next-meal choice, isolated candidate — 2026-10-21
+
+Food can explicitly open up to three qualitative ingredient ideas using the one
+canonical Core diet/exclusion preferences. Core owns one Moscow-day planned
+choice and bounded idempotent receipts; choose/replace/cancel do not record food,
+nutrients, targets or AI attempts. Native Food trial/paid access, source freshness,
+owner/proof, concurrent preference edits, lost responses and account changes stay
+guarded. Food clear-data atomically advances a monotonic owner reset epoch so old
+snapshots and receipts cannot restore a cleared plan. The independent readiness
+gate prevents rollback to an older Food purger. See [NEXT_MEAL_CHOICES.md](NEXT_MEAL_CHOICES.md).
+
+Exact isolated current sources: full Windows Core discovered 382 tests, with zero
+assertion failures, two pre-existing Windows open-file replacement/cleanup errors
+in test_source_snapshots, and 27 explicit Linux-only skips; all 41 new D05
+SQLite/ASGI/updater cases passed. Full Food passed147 tests without skips/errors.
+Playwright UI tests passed20 cases using actual shipped Food markup/script and
+controlled offline responses, including pending-operation reload, reset/proof/
+owner races, conflicts, storage refusal, focus and320/390px at100/200% text in
+both themes. This UI suite is not an actual running Food→Core backend/browser
+integration or physical Telegram/iPhone test. Earlier failed/interrupted reports
+are retained. Full Linux and combined actual integration are required separately;
+no production feature gate, Git, server, payment, provider or consumer was changed.
+
+
+## Combined third journey release gates — 2026-10-22
+
+The combined candidate passed 863 Linux Python tests with no errors/failures/skips: full Core388 on immutable source B, plus byte-identical Food147/Gym239/Supply89 from immutable source A. Source B freeze SHA256 5cfc0a7b0b3de71cde582d2f23409cc4a876380f87a8f4844bbd05d69a5845b5; full B archive SHA256 30b0b0a5853a3ea8e1cada25e8e5aff60b32d4e7a99e4392e85767c1caba292b. The first Core run's single failed fixture is retained: its freshly saved Food meal used a UTC journal date when Moscow was already on the following date. Only test_owner_policy.py was corrected to derive Food day from the same saved instant in Europe/Moscow, including the 21:00–24:00 UTC boundary window; original assertions, runtime and frontend bytes were preserved. This is not a claim that save time equals consumption time.
+
+Fresh combined browser evidence on runtime-identical source A passed 58 regressions (46 baseline/shadow +12 strict-owner cases), report SHA256 04970a08170774ad32cefafb0786cf5b837fbe85f25a99f63c4e7548b70b55b9. The temporary next-meal gate was absent during these 58 cases. One separately counted positive coexistence scenario then enabled only the temporary gate and checked real native Food choice -> subscriptions/product switching -> native Gym -> Food return, preserving the planned choice and native meal/nutrient/request counts and macros; report SHA256 721af9d52cab9bc8449206532abe5f152f59481ee8d9576abfba5a9884ec2546. Optional-tour JS17 is counted separately. Earlier D05 actual10 and optional-tour actual10 remain source-scoped, separate evidence; they are not re-counted as fresh combined cases. Browser emulation and synthetic CSS text doubling are not physical Telegram/device tests, browser zoom, WCAG certification, or conversion evidence. No real AI/provider/payment calls or extra bot consumers were used.
+
+These are completed release gates, not proof of a completed deployment or activation. Before publication the four-database off-server restore-tested backup b5c3cc16befec2650b67afb5271210dc1bdb0e70d275b787c3011ff00442734b contains financial2 and owner-consent1; it does not establish next-meal readiness. Install through the existing coordinated updater with next-meal gate absent, verify the completed transaction, new actually running Food/Core services, fresh private Food reset projection, compatible current/updater/fallback and a new compatible backup. Activate next-meal-v1-ready only under both updater locks and then capture/restore-test a post-activation backup containing all three gates. Never remove persistent gates or restore databases over later user writes during ordinary code rollback.
+
+Core retains the single canonical preference store and planned next-meal choice. Keep the choice separate from consumed Food records, preserve reset/ABA/idempotency guards and enforce compatible Food reset purger plus Core/updater protocol1 on recovery.

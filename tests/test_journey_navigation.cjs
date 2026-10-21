@@ -16,7 +16,11 @@ function hook(source,extra={}){
  const env={window:{Progressor:{interactionRevision:()=>revision,_launchBridge:{getState:()=>({session:{user:{id:123}},launchData:'fixture-launch'})}}},document:{getElementById:node,querySelector:()=>node('own-list-close')},matchMedia:()=>({matches:true}),state,loadViewerRole:async()=>{},mealDrafts:{},mealEditorOpen:false,activeMode:'yesterday',lastDayData:{day:'2026-10-19'},lastLoadedDateIso:'2026-10-19',dayRequest:0,screenToday:node('screen-today'),isEditing:()=>false,isoToday:()=> '2026-10-19',
   showScreen:name=>calls.push(['screen',name]),setActiveMode:name=>{env.activeMode=name;calls.push(['mode',name]);},loadDay:async name=>{env.dayRequest++;calls.push(['load',name]);},
   navigateTo:route=>{calls.push(['route',route,state.settings.pendingView]);state.currentRoute=route;},activateTab:tab=>{calls.push(['tab',tab]);state.activeTab=tab;},openMySupplements:async()=>{calls.push(['own-list']);state.mySupplements.open=true;},...extra};
- if(source==='gym')vm.runInNewContext(html.match(/function hasVerifiedOwnGymSubject\(\) \{[\s\S]*?\n    \}/)[0],env,{filename:files[source]});
+ if(source==='gym'){
+  vm.runInNewContext(html.match(/function hasVerifiedOwnGymSubject\(\) \{[\s\S]*?\n    \}/)[0],env,{filename:files[source]});
+  state.tour={active:false,automaticDeferred:false};env.stopTour=()=>{state.tour.active=false};
+  vm.runInNewContext(html.match(/function deferAutomaticTourForOwnedTask\(\) \{[\s\S]*?\n    \}/)[0],env,{filename:files[source]});
+ }
  vm.runInNewContext(code,env,{filename:files[source]});
  return {hook:env.window.ProgressorDomain,state,calls,env,node,setRevision:value=>{revision=value;}};
 }
