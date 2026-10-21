@@ -584,7 +584,12 @@ class Updater:
             emit('Проверяю новую версию: ' + REPOS[name]['title'] + '…')
             for i, (unit, pattern) in enumerate(selections):
                 tmp = self.folder / ('tests-' + name + '-' + str(i)); tmp.mkdir()
-                args = [self.python_for_unit[unit], '-m', 'unittest', 'discover', '-s', 'tests']
+                if name == 'core':
+                    runner = source / 'deploy/run_core_checks.py'
+                    if not runner.is_file(): raise UpdateError('missing_core_check_runner')
+                    args = [self.python_for_unit[unit], str(runner), 'discover', '-s', 'tests']
+                else:
+                    args = [self.python_for_unit[unit], '-m', 'unittest', 'discover', '-s', 'tests']
                 if pattern:
                     if not (source / 'tests' / pattern).is_file(): raise UpdateError('missing_contract_tests:' + name)
                     args += ['-p', pattern]

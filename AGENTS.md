@@ -51,3 +51,11 @@ Read the canonical [journey contract](https://github.com/MarkKoro/progressor_cor
 Keep the canonical owner-policy boundary and synchronized progressor_client mirrors; read Core docs/SUPPLY_OWNER_POLICY.md before changing source metadata, legal eligibility or updater recovery. The persistent owner-consent-v1-ready gate is independent from financial protocol2 and must survive ordinary code rollback. Supply keeps its single native consent predicate; Core reads only private owner snapshots.
 
 Preserve operation-key retries in Gym /set/add_once (no legacy fallback after an uncertain response), explicit saved-time provenance in Food, and Supply uncertain-delivery suppression (an unknown Telegram response must never trigger a blind retry). Keep native functions available during Core outages.
+
+## Offline contract tests and host readiness boundaries
+
+Core deployment tests run through `deploy/run_core_checks.py`. Its isolated test
+subprocess redirects reader default readiness paths before discovery; explicit
+strict-mode fixture gates still apply. Application readers never use a test
+environment switch. Do not let host owner/next-meal gates select the semantics of
+legacy synthetic test databases. Updater fixtures must own their gate paths too.

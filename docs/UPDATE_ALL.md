@@ -83,3 +83,19 @@ update-all --check
 OWNER_POLICY_PROTOCOL>=1 и OWNER_POLICY_UPDATER_PROTOCOL>=1 в кандидате и
 восстанавливаемых версиях. Ограниченный shadow-этап, проверка private snapshot,
 совместимый резервный выпуск и активация описаны в [SUPPLY_OWNER_POLICY.md](SUPPLY_OWNER_POLICY.md).
+
+## Core contract checks after readiness activation
+
+Core candidate tests use the explicit `deploy/run_core_checks.py` entry point.
+It redirects the owner-policy and optional next-meal reader defaults to absent
+private temporary paths only inside that test subprocess, before discovery.
+Explicit strict fixture paths remain effective. The production Store, Engine,
+reader code, readiness files and environment policy are unchanged. Dynamically
+loaded updater test fixtures also set their own absent gate paths.
+
+A causal regression reuses an existing multi-owner weight test: a simulated
+host marker makes the unisolated legacy fixture fail; the isolated runner passes
+while the same explicit strict fixture still refuses the unknown owner. Optional
+next-meal isolation and exception cleanup are covered too. Missing runner code
+refuses the candidate test command. This keeps later updates usable after strict
+activation without adding a production test bypass or weakening reader guards.

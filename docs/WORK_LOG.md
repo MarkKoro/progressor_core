@@ -147,3 +147,12 @@ Candidate D06 delivery outcomes, D07 idempotent set writes, D08 owner metadata/r
 The initial full run exposed an outdated historical-day fixture; its old failure is retained and the corrected Core suite passed. Browser recovery corrected test-only Windows SQLite replacement waiting and an async condition wait; prior negative reports remain preserved. Only Markdown release notes and own-account Food/Gym control-plane scope clarification changed after freeze. The native save timestamp is not claimed to be consumption time.
 
 Publication and controlled rollout are separate from these completed gates. Install owner metadata and protocol1 reader/updater in bounded shadow, verify the compatible new current/fallback, private fresh exports and backup restore, then activate owner gate under both updater locks; preserve financial2 and user writes. Capture and off-server restore-test a post-activation backup containing both persistent gates. Do not use a pre-protocol Core fallback after activation. D05 next-meal choices and optional tour coordination remain a separate third package.
+
+## 2026-10-21 — isolate offline contract readiness from host state
+
+Before activating owner policy, an existing temporary multi-owner weight fixture
+was run with absent/present simulated default markers. Only the present case
+failed (`owner_sync` returned zero commands), proving that host readiness could
+break future updater tests. Added a Core-only explicit test runner, test-owned
+updater gates and causal regressions; production reader code/gates are untouched.
+Linux full-candidate verification is required before publishing this correction.

@@ -32,8 +32,11 @@ class CoordinatedUpdate(unittest.TestCase):
         for name, value in {'CORE': self.core, 'STATE': self.core / 'updater/state.json',
                             'UPDATERS': self.core / 'updater', 'TRANSACTIONS': self.root / 'transactions',
                             'SYSTEMD': self.root / 'systemd', 'BACKUPS': self.root / 'backups',
-                            'RUNTIMES': self.root / 'runtimes'}.items():
+                            'RUNTIMES': self.root / 'runtimes',
+                            'OWNER_POLICY_GATE': self.root / 'owner-consent-v1-ready'}.items():
             self.stack.enter_context(patch.object(up, name, value))
+        if hasattr(up, 'MEAL_CHOICE_GATE'):
+            self.stack.enter_context(patch.object(up, 'MEAL_CHOICE_GATE', self.root / 'next-meal-v1-ready'))
         self.repos = {n: {**s, 'path': self.root / 'repositories' / n} for n, s in up.REPOS.items()}
         self.stack.enter_context(patch.object(up, 'REPOS', self.repos))
         self.stack.enter_context(patch.object(up,'DBS',{name:self.root/(name+'.sqlite3') for name in up.DBS}))
@@ -284,6 +287,35 @@ class CoordinatedUpdate(unittest.TestCase):
         with patch.dict('os.environ', {'PROGRESSOR_GYM_BOT_TOKEN': 'live', 'DB_PATH': '/live/db'}):
             env = up.offline_environment(self.root)
         self.assertNotIn('PROGRESSOR_GYM_BOT_TOKEN', env); self.assertNotEqual(env['DB_PATH'], '/live/db')
+
+
+    def test_core_contract_subprocess_uses_isolated_runner(self):
+        source = self.root / 'candidate-core'; (source / 'tests').mkdir(parents=True)
+        (source / 'deploy').mkdir(); (source / 'deploy/run_core_checks.py').write_text('# offline runner fixture\n')
+        self.u.changed = {'core'}; self.u.candidates = {'core': source}
+        self.u.python_for_unit = {'progressor_core.service': '/offline/python'}
+        calls = []
+        def checked(args, **kwargs):
+            calls.append((args, kwargs))
+            kwargs['logfile'].write_text('Ran 1 test in 0.001s\n\nOK\n')
+            return 0, b''
+        with patch.object(up, 'command', side_effect=checked):
+            self.u.test_candidates()
+        self.assertEqual(len(calls), 1)
+        command, options = calls[0]
+        self.assertEqual(command, ['/offline/python', str(source / 'deploy/run_core_checks.py'), 'discover', '-s', 'tests', '-q'])
+        self.assertEqual(options['cwd'], source)
+        self.assertEqual(options['env']['PROGRESSOR_SOURCE_SNAPSHOT_ENABLED'], '0')
+        self.assertTrue(self.u.state['tests_passed']); self.assertEqual(self.u.state['tests'], {'core': 1})
+
+    def test_missing_core_runner_refuses_before_any_test_command(self):
+        source = self.root / 'candidate-core'; (source / 'tests').mkdir(parents=True)
+        self.u.changed = {'core'}; self.u.candidates = {'core': source}
+        self.u.python_for_unit = {'progressor_core.service': '/offline/python'}
+        with patch.object(up, 'command') as command:
+            with self.assertRaisesRegex(up.UpdateError, 'missing_core_check_runner'):
+                self.u.test_candidates()
+        command.assert_not_called()
 
     def test_core_only_still_checks_all_shared_helpers(self):
         self.u.selected = {'core'}
