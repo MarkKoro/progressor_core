@@ -83,14 +83,13 @@ def save_preferences(store,user_id,patch,expected_revision):
                    (uid,expected_revision+1,canonical(body),time.time()))
     return preferences(store,uid)
 
-def permitted_entities(store,user_id,now=None,*,snapshot=None):
+def permitted_entities(store,user_id,now=None,*,snapshot=None,respect_rest=False):
+    from .owner_policy import eligible_sources
     now=now or datetime.now(timezone.utc)
-    entities,members,state=snapshot if snapshot is not None else store.data(subject(user_id))
+    current=snapshot if snapshot is not None else store.data(subject(user_id))
+    entities,members,state=current
     access=entitlements(store,subject(user_id),now,entities)
-    policy=preferences(store,user_id)
-    allowed={s for s in access['accessible_domains'] if policy['sources'][s]
-        and s in getattr(store,'enabled_sources',SOURCES)
-        and state.get(s,{}).get('status')=='ok' and time.time()-(state[s].get('last_success') or 0)<120}
+    allowed=eligible_sources(store,user_id,current,now,access=access,respect_rest=respect_rest)
     return [e for e in entities if e['source'] in allowed],members,access
 
 def weight_choices(store,user_id,*,snapshot=None):
@@ -109,8 +108,9 @@ def weight_choices(store,user_id,*,snapshot=None):
             'event_id':entity['event_id'],'entity_id':entity['entity_id'],'observed_at':entity['occurred_at']}
     items=[latest[s] for s in SOURCES if s in latest]
     values=[i['value'] for i in items]
-    targets=[s for s in SOURCES if s in access['accessible_domains'] and s in getattr(store,'enabled_sources',SOURCES) and any(m['source']==s and m['active'] for m in members)
-             and preferences(store,user_id)['sources'][s]]
+    # Targets must be currently eligible as well as paid. An unknown or closed
+    # Supply owner decision cannot receive a new cross-product profile command.
+    targets=[s for s in SOURCES if any(e['source']==s for e in entities)]
     return {'items':items,'fingerprint':digest(items),'targets':targets,
         'conflict':bool(len(values)>1 and max(values)-min(values)>.2),
         'explanation':'Выберите актуальный вес. Остальные профили обновятся после подтверждения; история измерений и цель питания сохраняются.'}
@@ -161,13 +161,17 @@ def owner_sync(store,source,people,acks):
                 db.execute('UPDATE connection_commands SET status=?,result=? WHERE id=? AND source=?',
                            (ack['status'],canonical(result),ack['id'],source))
         known={r[0] for r in db.execute('SELECT user_id FROM memberships WHERE source=? AND active=1',(source,))}
-        commands=[dict(r) for r in db.execute("SELECT id,user_id,body,expires_at FROM connection_commands WHERE source=? AND status='pending' AND expires_at>? ORDER BY created_at LIMIT 100",(source,time.time())) if r['user_id'] in known]
+        commands=[dict(r) for r in db.execute("SELECT id,user_id,body,expires_at,created_at FROM connection_commands WHERE source=? AND status='pending' AND expires_at>? ORDER BY created_at LIMIT 100",(source,time.time())) if r['user_id'] in known]
     from .training_rhythm import active
     settings=[{'user_id':uid,'preferences':{**preferences(store,uid),'rhythm':active(store,uid),'synced_at':time.time()}} for uid in sorted(set(people)|{c['user_id'] for c in commands}) if uid in known]
     ready=[]
     for command in commands:
-        policy=preferences(store,command['user_id'])
-        if not policy['sources'][source] or source not in entitlements(store,command['user_id'])['accessible_domains']:continue
+        entities,_,_=permitted_entities(store,command['user_id'])
+        if not any(e['source']==source for e in entities):continue
+        if source=='supply':
+            from .owner_policy import changes_since
+            opened_at=changes_since(store,command['user_id'])
+            if opened_at is not None and command['created_at']<opened_at:continue
         ready.append({**command,'body':json.loads(command['body'])})
     return {'settings':settings,'commands':ready}
 
@@ -245,11 +249,14 @@ def weekly_overview(store,user_id,now=None):
     now=now or datetime.now(timezone.utc)
     data=build_context(store,subject(user_id),now=now)
     nutrition=data.get('nutrition') or {};activity=data.get('activity') or {}
-    entities,_,_=permitted_entities(store,user_id)
+    entities,_,_=permitted_entities(store,user_id,now)
     start=now-timedelta(days=7)
     workouts=[e for e in entities if e['source']=='gym' and e['entity_id'].startswith('workout:')
               and start<=datetime.fromisoformat(e['payload']['completed_at'].replace('Z','+00:00'))<=now]
-    supply=data.get('supply')
+    # Context retains a degraded Supply shell to explain source health. It is
+    # not permission to turn an old ledger into a current weekly aggregate.
+    supply=data.get('supply') if (data['sources'].get('supply',{}).get('status')=='ok'
+        and any(e['source']=='supply' for e in entities)) else None
     intake_count=None
     if supply:
         # The public context carries only 90 recent rows. A weekly aggregate

@@ -17,7 +17,7 @@ LABELS={'kcal':'ккал','protein':'белка, г','fat':'жиров, г','car
 
 def review(store,user_id,now=None):
     now=now or datetime.now(timezone.utc)
-    entities,_,access=permitted_entities(store,user_id,now)
+    entities,_,access=permitted_entities(store,user_id,now,respect_rest=True)
     policy=preferences(store,user_id,now.timestamp())
     food=[e for e in entities if e['source']=='food']
     end=now.astimezone(ZoneInfo('Europe/Moscow')).date();start=end-timedelta(days=7)

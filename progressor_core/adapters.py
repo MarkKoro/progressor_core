@@ -206,7 +206,7 @@ def food(db):
                 display_title=', '.join(i['name'].strip() for i in raw.get('items',[]) if isinstance(i,dict) and isinstance(i.get('name'),str))[:120]
                 if not display_title and isinstance(raw.get('template_name'),str):display_title=raw['template_name'][:120]
             except (TypeError,ValueError,AttributeError):pass
-        entities.append(entity('meal:' + str(row['id']), row['user_id'], 'meal.logged', occurred_at, source_local_date=day, timezone=tz, timestamp_basis='legacy_server_timezone', source_revision=row['version'], macros=macros, nutrients=observations, estimate_quality='food_logged_estimate',display_title=display_title))
+        entities.append(entity('meal:' + str(row['id']), row['user_id'], 'meal.logged', occurred_at, source_local_date=day, timezone=tz, timestamp_basis='legacy_server_timezone', recorded_at=occurred_at if row['created_at'] else None, recorded_at_basis='legacy_server_timezone' if row['created_at'] else 'missing', consumed_at=None, consumed_at_basis='not_reported', source_revision=row['version'], macros=macros, nutrients=observations, estimate_quality='food_logged_estimate',display_title=display_title))
         total = days.setdefault((row['user_id'], day), {'totals': {k: 0.0 for k in macros}, 'logged_meal_count': 0, 'nutrients': {}})
         total['logged_meal_count'] += 1
         # Save-time provenance belongs to the source's existing diary day. Never
@@ -251,12 +251,14 @@ def supply(db):
     users = {row['id']: dict(row) for row in db.execute("SELECT * FROM users WHERE COALESCE(is_banned,0)=0 AND COALESCE(deleted_at_utc,'')='' ")}
     members = [{'local_id': str(uid), 'user_id': subject(user['tg_user_id'])} for uid, user in users.items()]
     entities = []
+    from .owner_policy import parse_supply_metadata
+    owner_consent=parse_supply_metadata(db,users)
     for uid, user in users.items():
         tz = user['tz_name'] or 'UTC'
         zone(tz)
         paid=instant(user['premium_until_utc']) if user.get('premium_until_utc') else None
         trial=instant(user['starter_trial_until_utc']) if user.get('starter_trial_until_utc') else None
-        entities.append(entity('profile:' + str(uid), user['tg_user_id'], 'profile.updated', instant(user['created_at']), timezone=tz, consent_given=bool(user['consent_given']),paid_until=paid,access_basis='native_subscription',native_trial_until=trial))
+        entities.append(entity('profile:' + str(uid), user['tg_user_id'], 'profile.updated', instant(user['created_at']), timezone=tz, consent_given=bool(user['consent_given']),owner_consent=owner_consent[uid],paid_until=paid,access_basis='native_subscription',native_trial_until=trial))
     supplement_names = {r['id']: str(r['name_ru'] or r['name'] or '')[:160] for r in db.execute('SELECT id,name,name_ru FROM supplements')} if db.execute("SELECT 1 FROM sqlite_master WHERE name='supplements'").fetchone() else {}
     for row in db.execute('SELECT * FROM user_supplements'):
         user = users.get(row['user_id'])

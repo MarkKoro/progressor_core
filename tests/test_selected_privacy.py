@@ -132,7 +132,16 @@ class SelectedPrivacy(unittest.TestCase):
 
     def test_meal_events_minimal_fresh_paid_and_rest_optout_denied(self):
         from progressor_core.meal_anchors import events
-        with sqlite3.connect(self.paths['food']) as db:db.execute('UPDATE meals SET created_at=?',(self.now.isoformat(),))
+        from zoneinfo import ZoneInfo
+        recorded_day=self.now.astimezone(ZoneInfo('Europe/Moscow')).date()
+        # A fresh save of yesterday's journal row is not a fresh meal event.
+        with sqlite3.connect(self.paths['food']) as db:
+            db.execute('UPDATE meals SET created_at=?,date=?',(self.now.isoformat(),(recorded_day-timedelta(days=1)).isoformat()))
+        self.store.reconcile('food',snapshot('food',self.paths['food']))
+        self.assertFalse(events(self.store,[self.uid,self.coach],self.now)['items'])
+        # The original positive case needs a genuinely current journal day.
+        with sqlite3.connect(self.paths['food']) as db:
+            db.execute('UPDATE meals SET date=?',(recorded_day.isoformat(),))
         self.store.reconcile('food',snapshot('food',self.paths['food']))
         value=events(self.store,[self.uid,self.coach],self.now)
         self.assertEqual(len(value['items']),1);self.assertEqual(value['items'][0]['user_id'],self.uid)

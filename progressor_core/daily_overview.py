@@ -15,6 +15,7 @@ STATUS = {
     'access_required': ('Для связи нужен активный доступ', 'История сохраняется. Доступ к каждому продукту виден в «Подписках».'),
     'target_unavailable': ('Общая картина в этом продукте недоступна', 'Проверьте его доступ и включение связи. Остальные продукты продолжают работать.'),
     'consent_required': ('Нужно согласие в Supply', 'Подтвердите использование данных в собственном профиле Supply.'),
+    'policy_unavailable': ('Подтверждение связи временно недоступно', 'Данные Supply пока не участвуют в связях. Обычные функции и записи Supply сохраняются.'),
     'stale': ('Обновление временно задерживается', 'Старые данные не используются для новых подсказок. Попробуйте обновить позже.'),
     'unavailable': ('Связь временно недоступна', 'Текущий продукт и ваши записи продолжают работать.'),
 }
@@ -27,11 +28,14 @@ def connection_health(store, user_id, now=None, *, target=None, snapshot=None, a
     access = access if access is not None else entitlements(store, uid, now, entities)
     policy = policy if policy is not None else preferences(store, uid)
     enabled = set(getattr(store, 'enabled_sources', SOURCES))
+    from .owner_policy import supply_state
+    owner_state=supply_state(store,entities)
     profiles = {e['source']: e['payload'] for e in entities
                 if e['entity_id'].startswith('profile:') and e['payload'].get('profile_kind') is None}
     joined = {m['source'] for m in members if m['active']}
     target_ready = target is None or (target in enabled and target in joined
-                   and access['domains'][target] and policy['sources'][target])
+                   and access['domains'][target] and policy['sources'][target]
+                   and (target!='supply' or owner_state in ('current','shadow')))
     rows = []
     for source in SOURCES:
         observed = state.get(source, {})
@@ -40,10 +44,12 @@ def connection_health(store, user_id, now=None, *, target=None, snapshot=None, a
         if source not in enabled: status = 'unavailable'
         elif policy['rest_active']: status = 'paused'
         elif not policy['sources'][source]: status = 'disabled'
+        elif source == 'supply' and source in joined and access['domains'][source] and owner_state=='closed': status = 'consent_required'
+        elif source == 'supply' and source in joined and access['domains'][source] and owner_state=='unknown': status = 'policy_unavailable'
         elif not target_ready: status = 'target_unavailable'
         elif source not in joined: status = 'not_connected'
         elif not access['domains'][source]: status = 'access_required'
-        elif source == 'supply' and not profiles.get(source, {}).get('consent_given'): status = 'consent_required'
+        elif source == 'supply' and owner_state=='shadow' and not profiles.get(source, {}).get('consent_given'): status = 'consent_required'
         elif observed.get('status') != 'ok' or age is None or not -5 <= age < 120: status = 'stale'
         else: status = 'ready'
         title, message = STATUS[status]

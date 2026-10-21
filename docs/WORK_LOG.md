@@ -104,3 +104,46 @@ Gym personal last values, workout drafts and pending AI proposals now use verifi
 Known follow-up: Gym's existing optional first-visit walkthrough can overlay an incoming plan screen. Route/return checks do not claim that every first-use guide is already coordinated with a purposeful cross-product visit. Preserve mandatory onboarding and do not mark an optional tour completed merely by navigation; a separate follow-up can defer it with an explicit way to resume.
 
 Pre-switch application backup 20261020T094455Z-pre-journeys.tar.gz (159247991B), SHA256 698aced56f0900f2239be97190b03b45950fe2ce115ad70c94ace72d632302f3, was downloaded and restored off-server for all4 SQLite databases, with schema/count/integrity, code/configuration, commands, financial-v2 gate and private SQLite runtime checks. These are application checkpoints, not a globally atomic disk image. Main publication, update-all transaction, installed revisions and post-switch verification are recorded separately in the durable deployment journal; this entry does not assert a completed switch. Additive tables/triggers remain on code rollback; later user/financial writes must be preserved. D06 Supply uncertain-send and D07 Gym add-set retry are separate following packages.
+# 2026-10-20 — isolated weekly freshness candidate
+
+Supply weekly aggregate now requires the existing currently permitted projection
+and source status `ok`; a degraded shell no longer triggers a SQL count of stale
+intakes or a misleading zero active-supplement count. Complete allowed aggregates
+beyond the public recent-90 list remain intact. Native consent/financial policy
+and source history are unchanged. See [WEEKLY_FRESHNESS.md](WEEKLY_FRESHNESS.md).
+
+Before: three targeted stale/aged/config-disabled regressions failed on the
+previous source. Candidate: 13 new cases plus related context/day/permission/review
+suites, 92 tests passed with zero skips on isolated Windows/ASGI; reused 13-state
+permission fixture passed with stale Supply now null. No Telegram/AI/provider calls,
+production writes, publication or rollout. Linux release verification remains pending.
+
+
+
+## D09 — Food journal date and saved-time provenance — 2026-10-21
+
+Historical/future Food journal entries no longer become fresh meal anchors just
+because they were added now. UTC save provenance remains separate from the
+Moscow diary date and unknown consumption time. The inclusive ten-minute age
+window, the existing 90-minute Supply slot policy, own access/consent/rest gates,
+history, macro/nutrient totals and native schema are unchanged. Previous adapter
+payloads remain supported with the same journal-day guard. See
+[MEAL_RECORD_TIME.md](MEAL_RECORD_TIME.md).
+
+Validation on isolated Windows databases: 88 related Core tests (including 15
+new recorded-time cases), 4 Food API/export cases and 4 actual native HTML
+rendering cases passed. The real native Food save → owner snapshot → adapter →
+signed Core ASGI probe passed 11 checks; the baseline includes the historical
+entry and fails that causal check. No providers, Telegram delivery, consumer,
+production or Git changes were made by this isolated implementation. Linux and
+combined owner-consent integration remain release gates. The native writer
+supports a historical day; no existing end-user backdate UI was demonstrated.
+
+
+## Combined second journey release gates — 2026-10-21
+
+Candidate D06 delivery outcomes, D07 idempotent set writes, D08 owner metadata/read policy and weekly permission correction, D09 saved-time provenance passed 808 Linux tests with no failures/errors/skips (Core341 checks5; byte-identical Food139/Gym239/Supply89 checks4), plus 58 fresh actual-browser scenarios (46 shadow +12 strict). Runtime/test source freeze SHA256 fcb1a9ece235533d38d6d2c5c4032da5b79f1822500ddd9ca271a5fe214355ef; browser report SHA256 ad288e7b9f75a14dc94af87b3ff2b1c547677691313b0ab5ae068030be916b4c. Browser emulation is not physical Telegram/device testing. Zero provider/AI/payment calls and no extra consumers.
+
+The initial full run exposed an outdated historical-day fixture; its old failure is retained and the corrected Core suite passed. Browser recovery corrected test-only Windows SQLite replacement waiting and an async condition wait; prior negative reports remain preserved. Only Markdown release notes and own-account Food/Gym control-plane scope clarification changed after freeze. The native save timestamp is not claimed to be consumption time.
+
+Publication and controlled rollout are separate from these completed gates. Install owner metadata and protocol1 reader/updater in bounded shadow, verify the compatible new current/fallback, private fresh exports and backup restore, then activate owner gate under both updater locks; preserve financial2 and user writes. Capture and off-server restore-test a post-activation backup containing both persistent gates. Do not use a pre-protocol Core fallback after activation. D05 next-meal choices and optional tour coordination remain a separate third package.

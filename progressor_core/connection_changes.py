@@ -42,8 +42,11 @@ def recent(store,user_id,now=None,*,snapshot=None):
     # datetime truncates to microseconds. The same clock instant may otherwise
     # hide a just-committed change from the first subsequent read.
     cutoff=now.timestamp()+.000001
+    from .owner_policy import changes_since
+    opened_at=changes_since(store,uid)
     with store.connection() as db:
-        rows=[dict(r) for r in db.execute('SELECT * FROM connection_changes WHERE user_id=? AND observed_at>? AND observed_at<=? ORDER BY observed_at DESC LIMIT 100',(uid,(now-timedelta(days=7)).timestamp(),cutoff)) if r['source'] in allowed]
+        rows=[dict(r) for r in db.execute('SELECT * FROM connection_changes WHERE user_id=? AND observed_at>? AND observed_at<=? ORDER BY observed_at DESC LIMIT 100',(uid,(now-timedelta(days=7)).timestamp(),cutoff))
+              if r['source'] in allowed and (r['source']!='supply' or opened_at is None or r['observed_at']>=opened_at)]
     result=[]
     names={'food':'Food','gym':'Gym Diary','supply':'Supply'}
     for row in rows[:12]:

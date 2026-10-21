@@ -18,11 +18,9 @@ def build_context(store, user_id, now=None, requested_day=None, target=None, ena
     access=entitlements(store,user_id,now,entities)
     policy=preferences(store,user_id)
     offer=bundle_preview(entities,access,target,now,enabled_sources)
-    allowed={s for s in access['accessible_domains']}
-    allowed={s for s in allowed if policy['sources'][s]}
-    if policy['rest_active']:allowed=set()
-    if enabled_sources is not None: allowed.intersection_update(enabled_sources)
-    if target is not None and target not in allowed: allowed=set()
+    from .owner_policy import eligible_sources
+    allowed=eligible_sources(store,user_id,request_snapshot,now,target=target,policy=policy,
+        access=access,enabled_sources=enabled_sources,fresh=False,respect_rest=True)
     entities=[e for e in entities if e['source'] in allowed]
     source_status = {}
     for source in ('gym', 'food', 'supply'):

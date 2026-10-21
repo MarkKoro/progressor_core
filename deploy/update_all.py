@@ -14,6 +14,7 @@ import shlex
 import shutil
 import signal
 import sqlite3
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -32,6 +33,8 @@ BACKUPS = Path('/root/progressor-backups')
 SYSTEMD = Path('/etc/systemd/system')
 DROPIN = 'zz-progressor-update-all.conf'
 UPDATERS = CORE / 'updater'
+OWNER_POLICY_GATE = Path('/var/lib/progressor/owner-consent-v1-ready')
+OWNER_POLICY_UPDATER_PROTOCOL = 1
 REPOS = {
     'gym': {'path': Path('/srv/gym_diary_prod'), 'repo': 'gym_diary_bot', 'title': 'Gym'},
     'food': {'path': Path('/srv/food_bot'), 'repo': 'food_bot', 'title': 'Food'},
@@ -104,6 +107,124 @@ def check_financial_epoch(candidates,db_path):
     for name in ('gym','food','supply'):
         if protocol_constant(candidates[name]/'progressor_client.py','FINANCIAL_SCHEDULE')<2:
             raise UpdateError('incompatible_financial_schedule:'+name)
+
+
+def owner_policy_epoch_required():
+    # lstat treats even a dangling gate symlink as enabled; access errors fail closed.
+    try:
+        OWNER_POLICY_GATE.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        raise UpdateError('owner_policy_gate_unavailable') from error
+    return True
+
+
+def owner_policy_constant(source, name):
+    """Read a reserved, unambiguous module-level integer marker without executing code."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError, TypeError, UnicodeError):
+        return 0
+    writes = [node for node in ast.walk(tree)
+              if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == name]
+    if len(writes) != 1:
+        return 0
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and node.targets[0] is writes[0] and isinstance(node.value, ast.Constant)
+                and type(node.value.value) is int):
+            return node.value.value
+    return 0
+
+
+def owner_policy_file_constant(path, name):
+    try:
+        return owner_policy_constant(Path(path).read_bytes(), name)
+    except OSError:
+        return 0
+
+
+def check_owner_policy_release(core):
+    if owner_policy_file_constant(Path(core) / 'progressor_core/owner_policy.py', 'OWNER_POLICY_PROTOCOL') < 1:
+        raise UpdateError('incompatible_owner_policy_protocol:core')
+    if owner_policy_file_constant(Path(core) / 'deploy/update_all.py', 'OWNER_POLICY_UPDATER_PROTOCOL') < 1:
+        raise UpdateError('incompatible_owner_policy_updater:core')
+
+
+def check_owner_policy_epoch(candidates):
+    if not owner_policy_epoch_required():
+        return
+    if not candidates.get('core'):
+        raise UpdateError('missing_owner_policy_candidate:core')
+    check_owner_policy_release(candidates['core'])
+
+
+def capture_persistent_gates():
+    """Recovery content only; ordinary code rollback never restores these gates."""
+    result = {}
+    paths = {'bundle-v2-ready': DBS['core'].parent / 'bundle-v2-ready',
+             'owner-consent-v1-ready': OWNER_POLICY_GATE}
+    for name, path in paths.items():
+        record = {'path': str(path), 'archive_name': 'var/lib/progressor/' + name, 'present': False}
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            result[name] = record
+            continue
+        except OSError as error:
+            raise UpdateError('backup_persistent_gate_unavailable:' + name) from error
+        mode = stat.S_IMODE(info.st_mode)
+        if (not stat.S_ISREG(info.st_mode) or info.st_size > 4096
+                or not mode & stat.S_IRUSR or (os.name != 'nt' and mode & 0o022)):
+            raise UpdateError('backup_persistent_gate_invalid:' + name)
+        try:
+            with path.open('rb') as stream:
+                opened = os.fstat(stream.fileno())
+                if (opened.st_dev, opened.st_ino, opened.st_mode, opened.st_size) != (
+                        info.st_dev, info.st_ino, info.st_mode, info.st_size):
+                    raise UpdateError('backup_persistent_gate_changed:' + name)
+                content = stream.read(4097)
+            if len(content) != info.st_size:
+                raise UpdateError('backup_persistent_gate_changed:' + name)
+        except OSError as error:
+            raise UpdateError('backup_persistent_gate_unavailable:' + name) from error
+        record.update(present=True, size=len(content), mode=mode,
+                      sha256=hashlib.sha256(content).hexdigest(), content=content)
+        result[name] = record
+    return result
+
+
+def persistent_gate_manifest(gates):
+    return {name: {key: value for key, value in record.items() if key != 'content'}
+            for name, record in gates.items()}
+
+
+def add_persistent_gates(tar, gates):
+    for record in gates.values():
+        if not record['present']:
+            continue
+        item = tarfile.TarInfo(record['archive_name'])
+        item.mode, item.size = record['mode'], record['size']
+        item.uid = item.gid = 0
+        tar.addfile(item, io.BytesIO(record['content']))
+
+
+def verify_persistent_gates(tar, gates):
+    for name, record in gates.items():
+        found = [item for item in tar.getmembers() if item.name == record['archive_name']]
+        if not record['present']:
+            if found:
+                raise UpdateError('backup_persistent_gate_unexpected:' + name)
+            continue
+        if len(found) != 1 or not found[0].isfile() or found[0].mode != record['mode']:
+            raise UpdateError('backup_persistent_gate_mismatch:' + name)
+        with tar.extractfile(found[0]) as stream:
+            content = stream.read(4097)
+        if len(content) != record['size'] or hashlib.sha256(content).hexdigest() != record['sha256']:
+            raise UpdateError('backup_persistent_gate_mismatch:' + name)
+    if persistent_gate_manifest(capture_persistent_gates()) != persistent_gate_manifest(gates):
+        raise UpdateError('backup_persistent_gate_changed_during_backup')
 
 
 def atomic_json(path, value):
@@ -377,6 +498,7 @@ class Updater:
         self.save()
 
     def check_helpers(self):
+        check_owner_policy_epoch(self.candidates)
         check_financial_epoch(self.candidates,DBS['core'])
         for name in ('gym', 'food', 'supply'):
             mapping = {**HELPERS, **({'workout_metrics.py': 'progressor_workout_metrics.py'} if name == 'gym' else {})}
@@ -527,6 +649,7 @@ class Updater:
 
     def backup(self):
         emit('Сохраняю код, настройки и проверенные копии четырёх баз…')
+        gates = capture_persistent_gates()
         required = 3 * sum(p.stat().st_size for p in DBS.values()) + sum(
             tree_size(s['path'], exclude={'venv', '.venv', '__pycache__', 'node_modules', 'backups'}) for s in REPOS.values())
         ensure_space(required + 256 * 1024**2)
@@ -541,6 +664,7 @@ class Updater:
             return item
         archive = folder / 'code-config.tar.gz'
         with tarfile.open(archive, 'w:gz') as tar:
+            add_persistent_gates(tar, gates)
             for spec in REPOS.values(): add_filtered_backup_tree(tar, spec['path'], arcname=str(spec['path']).lstrip('/'), filter=code_filter)
             add_filtered_backup_tree(tar, self.state['core_before'], arcname='previous-core-release', filter=lambda item: None if any(
                 p in {'.venv', '__pycache__'} for p in PurePosixPath(item.name).parts) else item)
@@ -560,11 +684,13 @@ class Updater:
             required = {'previous-core-release/progressor_core/app.py', 'etc/progressor/core.env', 'etc/progressor/signing.key'}
             required.update(str(REPOS[n]['path'] / f).lstrip('/') for n in ('gym', 'food', 'supply') for f in ('bot.py', '.env', '.git/config'))
             if not required.issubset(names): raise UpdateError('backup_missing_code_or_configuration')
+            verify_persistent_gates(tar, gates)
         manifest = {'created_at': datetime.now(timezone.utc).isoformat(), 'repositories': self.state['repositories'],
                     'units': self.state['units'], 'databases': checks, 'code_config_sha256': sha(archive),
                     'runtime_packages': {p: text_command([p, '-m', 'pip', 'freeze'])
                         for p in sorted({u['args'][0] for u in self.state['units'].values()})},
                     'core_previous': self.state['core_before'],
+                    'persistent_gates': persistent_gate_manifest(gates),
                     'scope': 'Four applications; online per-database copies, not a globally atomic snapshot or VPS image. Recovery never restores live databases.'}
         atomic_json(folder / 'manifest.json', manifest)
         bundle = folder.with_suffix('.tar.gz')
@@ -604,6 +730,7 @@ class Updater:
                 'update_gymdiary', 'update-progressor', 'updatecore')]
 
     def prepare_switch(self):
+        check_owner_policy_epoch(self.candidates)
         affected = [u for u in self.state['units'] if UNIT_SPECS[u][0] in self.changed or
                     u == 'progressor_core.service' and self.changed]
         self.state['affected'] = affected
@@ -643,6 +770,7 @@ class Updater:
             time.sleep(10)
 
     def switch(self):
+        check_owner_policy_epoch(self.candidates)
         self.save('switching', switch_started=True)
         for name in ('core', 'gym', 'food', 'supply'):
             info = self.state['repositories'][name]
@@ -670,6 +798,8 @@ class Updater:
 
     def promote_updaters(self):
         if 'core' not in self.changed: return
+        if owner_policy_epoch_required():
+            check_owner_policy_release(self.state['core_after'])
         for file in ('update_all.py', 'update_progressor.py'):
             source = Path(self.state['core_after']) / 'deploy' / file
             if not source.is_file(): raise UpdateError('missing_tested_updater:' + file)
@@ -677,6 +807,8 @@ class Updater:
 
     def rollback_repository(self, name):
         info = self.state['repositories'][name]
+        if name == 'core' and owner_policy_epoch_required():
+            self.check_owner_policy_repository_rollback(info)
         head = git(name, 'rev-parse', 'HEAD')
         if head not in {info['before'], info['target']}: raise UpdateError('concurrent_git_change_prevents_recovery:' + name)
         paths = []
@@ -695,8 +827,57 @@ class Updater:
         if paths: git(name, 'restore', '--source', info['before'], '--staged', '--worktree', '--', *paths)
         if head != info['before']: git(name, 'update-ref', 'refs/heads/main', info['before'], head)
 
+    def check_owner_policy_repository_rollback(self, info):
+        for path, marker in (('progressor_core/owner_policy.py', 'OWNER_POLICY_PROTOCOL'),
+                             ('deploy/update_all.py', 'OWNER_POLICY_UPDATER_PROTOCOL')):
+            code, source = command(['git', '-C', REPOS['core']['path'], 'show', info['before'] + ':' + path],
+                                   allow_failure=True)
+            if code or owner_policy_constant(source, marker) < 1:
+                raise UpdateError('incompatible_owner_policy_rollback:core')
+
+    def check_owner_policy_rollback(self):
+        if not owner_policy_epoch_required():
+            return
+        check_owner_policy_release(self.state['core_before'])
+        if 'core' in self.state['attempted_repositories']:
+            self.check_owner_policy_repository_rollback(self.state['repositories']['core'])
+        if 'update_all.py' in self.state['old_updaters']:
+            old = self.state['old_updaters']['update_all.py']
+            try:
+                protocol = owner_policy_constant(base64.b64decode(old, validate=True), 'OWNER_POLICY_UPDATER_PROTOCOL') if old else 0
+            except (ValueError, TypeError):
+                protocol = 0
+            if protocol < 1:
+                raise UpdateError('incompatible_owner_policy_rollback:updater')
+
+    def retain_owner_policy_current(self, reason):
+        # A gate can be enabled between the original switch and recovery. Never
+        # mix a compatible current release with old runtimes, dropins or updater.
+        errors = [str(reason)]
+        try:
+            current = (CORE / 'current').resolve(strict=True)
+            check_owner_policy_release(current)
+            if owner_policy_file_constant(UPDATERS / 'update_all.py', 'OWNER_POLICY_UPDATER_PROTOCOL') < 1:
+                raise UpdateError('incompatible_owner_policy_current:updater')
+        except (OSError, UpdateError) as error:
+            errors.append(str(error))
+            self.save(recovery_errors=errors, database_restored=False)
+            raise UpdateError('recovery_requires_attention_owner_policy_protocol') from reason
+        self.thaw_worker()
+        self.save(recovery_errors=errors, owner_policy_retained_core=str(current), database_restored=False)
+        # The interrupted transaction may have stopped services already. Resume
+        # only the retained code with its unchanged runtime configuration.
+        self.start_units()
+        report = self.wait_health()
+        self.save(health=report)
+        raise UpdateError('recovery_requires_attention_owner_policy_protocol') from reason
+
     def rollback(self):
         self.save('rolling_back')
+        try:
+            self.check_owner_policy_rollback()
+        except UpdateError as error:
+            self.retain_owner_policy_current(error)
         self.thaw_worker()
         # Stop new code before restoring any path. Failure to stop must not replace executing source files.
         # An aborted drain has not switched code. Leave the still-running paid job alone.

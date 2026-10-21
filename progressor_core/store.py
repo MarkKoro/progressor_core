@@ -37,6 +37,8 @@ class Store:
             db.executescript(SCHEMA)
             from .connections import SCHEMA as CONNECTION_SCHEMA
             db.executescript(CONNECTION_SCHEMA)
+            from .owner_policy import SCHEMA as OWNER_POLICY_SCHEMA
+            db.executescript(OWNER_POLICY_SCHEMA)
             if db.execute('SELECT max(version) FROM schema_version').fetchone()[0] != 1:
                 raise RuntimeError('unsupported_core_schema')
 
@@ -51,12 +53,12 @@ class Store:
         finally:
             db.close()
 
-    def accept(self, event, db=None):
+    def accept(self, event, db=None,*,_record_changes=True):
         event = validate(event)
         if db is None:
             with self.connection() as db:
                 db.execute('BEGIN IMMEDIATE')
-                return self.accept(event, db)
+                return self.accept(event, db,_record_changes=_record_changes)
         event_hash = digest(event)
         old = db.execute('SELECT hash FROM events WHERE event_id=?', (event['event_id'],)).fetchone()
         if old:
@@ -75,7 +77,7 @@ class Store:
             return 'out_of_order'
         deleted = event['event_type'].endswith('.deleted') or payload.get('deleted') is True
         from .connection_changes import record
-        record(db,event,old)
+        if _record_changes:record(db,event,old)
         db.execute('INSERT INTO entities VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(source,entity_id) DO UPDATE SET revision=excluded.revision,hash=excluded.hash,event_id=excluded.event_id,type=excluded.type,deleted=excluded.deleted,payload=excluded.payload', (event['source'], payload['entity_id'], event['user_id'], payload['revision'], event_hash, event['event_id'], event['event_type'], int(deleted), canonical(payload)))
         if event['source']=='gym' and ((payload.get('profile_kind')=='coach_link' and (payload.get('status')!='accepted' or payload.get('coach_enabled') is not True))
                 or (deleted and old and __import__('json').loads(old['payload']).get('profile_kind')=='coach_link')):
@@ -89,6 +91,9 @@ class Store:
         if len(current) != len(snapshot['entities']):
             raise ValueError('duplicate_snapshot_entity')
         with self.connection() as db:
+            db.execute('BEGIN IMMEDIATE')
+            from .owner_policy import observe_snapshot
+            opened=observe_snapshot(db,snapshot) if source=='supply' else set()
             previous = {row['entity_id']: dict(row) for row in db.execute('SELECT * FROM adapter_state WHERE source=?', (source,))}
             db.execute('UPDATE memberships SET active=0 WHERE source=?', (source,))
             for member in snapshot['memberships']:
@@ -118,7 +123,7 @@ class Store:
                     occurred_at = now_utc()
                 event_id = digest([source, entity_id, revision, content_hash])
                 event = {'event_id': event_id, 'event_type': event_type, 'schema_version': 1, 'source': source, 'user_id': user_id, 'occurred_at': occurred_at, 'correlation_id': event_id, 'payload': payload}
-                self.accept(event, db)
+                self.accept(event, db,_record_changes=user_id not in opened)
                 db.execute('INSERT INTO adapter_state VALUES(?,?,?,?,?,?) ON CONFLICT(source,entity_id) DO UPDATE SET revision=excluded.revision,hash=excluded.hash,deleted=excluded.deleted', (source, entity_id, user_id, revision, content_hash, int(item is None)))
                 changed += 1
             stamp = time.time()
