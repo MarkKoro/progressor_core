@@ -190,3 +190,25 @@ Fresh combined browser evidence on runtime-identical source A passed 58 regressi
 These are completed release gates, not proof of a completed deployment or activation. Before publication the four-database off-server restore-tested backup b5c3cc16befec2650b67afb5271210dc1bdb0e70d275b787c3011ff00442734b contains financial2 and owner-consent1; it does not establish next-meal readiness. Install through the existing coordinated updater with next-meal gate absent, verify the completed transaction, new actually running Food/Core services, fresh private Food reset projection, compatible current/updater/fallback and a new compatible backup. Activate next-meal-v1-ready only under both updater locks and then capture/restore-test a post-activation backup containing all three gates. Never remove persistent gates or restore databases over later user writes during ordinary code rollback.
 
 Core retains the single canonical preference store and planned next-meal choice. Keep the choice separate from consumed Food records, preserve reset/ABA/idempotency guards and enforce compatible Food reset purger plus Core/updater protocol1 on recovery.
+
+
+## 2026-10-23 — fourth journey recovery and read boundaries
+
+The canonical bounded AI cache has a trusted optional synchronous publication
+predicate, evaluated in its existing write transaction before cleanup, insert
+and eviction. It is byte-identical in all three bots. Food captures its native
+reset revision before asynchronous photo/text/voice work and fences both cache
+publication and the final native meal transaction; this does not claim a fix
+for other-domain purge paths. Food owns its six-hour photo metadata and saved
+result recovery; Core receives no draft or image. See Food PHOTO_RECOVERY.md.
+
+Root reviewed the immutable Food12-path overlay (192 local tests, 11 synthetic
+process-exit scenarios/36 phases), Gym5-path boundary (Linux58 and separate UI9),
+Supply6-path explanation/split fix (94 local tests and separate UI10), and one
+Supply Berlin-fold/rest/next-two-reminder holdout. Root's five canonical cache
+regressions check publication/reset ordering and default-caller TTL behavior.
+These are separately scoped gates, not an additive human UX sample or proof of
+physical Telegram/payments/providers. The complete assembled Linux regression
+is required on the final freeze before publication; exact results, archive,
+normal main revisions, backup restores and deployment are in the durable task
+journal and coordinated updater transaction. No new activation gate is added.
