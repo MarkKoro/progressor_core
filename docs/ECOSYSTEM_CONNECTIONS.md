@@ -48,3 +48,44 @@ Source health отдельно объясняет: профиль ещё не п
 Частичный `intake_owner_day` индекс принадлежит Core и включает только текущие Supply intake entities. Он помогает выбирать последние90 отметок и считать нужный местный день, не меняя данные или историю. На копии большого набора ответы до/после совпали; затем проверены все258 Core tests. Native code/tests совпадают с успешным checks2 (Gym222/Food113/Supply63). Итог656 без пропусков. Финальный Core snapshot SHA256: 88f8a5dc9797e410b3135d9f4529ee3a4cc7ca6a59f7efc9bec57339bd44888c.
 
 На Linux/ASGI после10 прогревов,100 измерений и5 конкурентных запросов: обзор дня p95 малый35,274/большой79,472мс; настройки64,999/97,675мс; общий контекст78,766/876,958мс. Большой набор:1004 сессии,20060 подходов,4122 блюда,10000 отметок. Все ответы200. Это лабораторный backend-замер, не задержка Telegram/мобильной сети. Первоначальные неоптимизированные результаты сохранены; бюджет не повышался.
+
+
+## Saved choice and current participation — 2026-10-23
+
+The shared settings window keeps each saved source checkbox and shows a separate
+current status/reason beside it, from fresh target-context Today health. An
+enabled checkbox does not promise current paid access, freshness or Supply legal
+consent. The existing expandable provenance remains available. Unknown/missing
+status and read errors never appear as ready; an unsaved toggle is labelled as
+unsaved. There is no extra per-load API or AI call and no new payment/consent CTA.
+
+Old settings GET/POST completions cannot replace a newer reopened form. While a
+preferences save is pending, its own input/select fields are temporarily disabled
+and Close stays available. On a current error the choice remains and its fields
+are restored; an old completion cannot unlock a new view. GET settings and POST
+preferences have an eight-second client acknowledgement budget. This design
+limit does not cancel or undo a server commit, and never automatically retries
+a write. Failed opens clear obsolete controls and offer a focused read-only
+retry. A409 preserves the choice and explicitly warns that refresh resets it.
+
+The canonical regression is tests/test_connection_readiness.cjs. Synthetic
+asset-only DOM/fault cases are separate from actual native HTML/API checks,
+physical Telegram/device tests and human comprehension measurements.
+
+
+## Stable repeated refresh — revision B, 2026-10-24
+
+The unpublished A passed its functional gates but repeated checking text caused
+measured temporary layout shifts. B keeps each currently measured note height
+while showing a short Checking marker. All measurements happen before writes.
+The minimum height is loading-only, never a maximum or clipping rule; a truly
+new reason or an error returns to natural layout. Resize/font loading invalidates
+old pixel reservations, and render/open/close remove their own listeners. No
+extra request, provider, UI preference, entitlement or consent action is added.
+
+Node23 preserves all20 request/draft/acknowledgement cases and adds3 scoped
+reservation/lifecycle cases. Separate paired asset geometry and one actual30s
+timer case are synthetic browser evidence; the final frozen composition also
+requires its own actual three-host checks. Neither is physical Telegram or a
+human comprehension study. Exact source-bound results live in the durable
+release journal; no result from A is renamed as B.

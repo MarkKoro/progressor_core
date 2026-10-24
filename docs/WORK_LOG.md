@@ -212,3 +212,79 @@ physical Telegram/payments/providers. The complete assembled Linux regression
 is required on the final freeze before publication; exact results, archive,
 normal main revisions, backup restores and deployment are in the durable task
 journal and coordinated updater transaction. No new activation gate is added.
+
+## Supply historical timezone provenance — 2026-10-23 candidate
+
+A native owner-CAS holdout reproduced Core relabeling the timezone of a saved
+Supply intake when the current profile changed. Source day, recorded UTC,
+identity, dose and paid state were unchanged. The Supply-scoped read adapter
+now uses only continuous owner-ledger intervals after their first recorded
+transition. Missing/legacy/broken lineage or a cutover in the saved second
+emits explicit unknown metadata, with no timezone fallback or owner write.
+Current profile time still controls the ordinary daily clock; see
+docs/SUPPLY_INTAKE_TIMEZONES.md. Shared helpers, mirrors and Gym are unchanged.
+
+An actual frozen-to-candidate reconciliation also exposed a false account-
+timezone change notice from repaired historical metadata. That retained failed
+holdout is covered by a base profile.updated/type/id/kind guard. A genuine
+profile timezone edit still produces its normal notice; other change kinds
+keep their existing predicates.
+
+Twelve focused Core regressions use private SQLite and no sockets. A separate
+native Supply owner writer/CAS fixture checks old-prefix unknown stability,
+new proven-interval stability, return/same-zone/stale-CAS and transaction abort
+with nine full snapshots. Local SQLite is3.49.1; target Linux3.54 and the full
+assembled release gate are separate required evidence. These scoped checks do
+not add924 tests, prove physical Telegram/human behavior, or close every H08
+calendar path. A read-only Gym pattern map records further untested leads;
+there is no speculative shared-helper rewrite or new consumer/provider call.
+
+
+## Fifth journey composition — 2026-10-23
+
+The canonical connections window now explains current participation beside the
+saved source choice, without implicitly changing access/consent or adding
+per-load provider/API work. Reproduced stale settings completions, failed-open
+retry and same-view edit loss during a pending save are covered by request/view
+ownership, explicit retry and an owned temporary field lock. Eight seconds is
+a client acknowledgement budget for settings GET/preferences POST; unknown
+write outcome never claims success, cancels a server commit or auto-retries.
+
+The exact UI was reviewed independently with whole-asset Node20 and four Edge
+seams (native disabled/pointer behavior, real GET/POST deadlines and409). Owner
+paired/unit/fault15, ordering2 and budget3 are distinct scoped evidence, not a
+human sample or full native-host/device certification. The six-path historical
+Supply candidate has separate12 focused regressions, native9 snapshots and a
+retained failed then corrected actual upgrade check. Current-profile timezone
+notices remain; repaired old metadata does not create one.
+
+Only Core changes in this composition; all selected native bot bytes and pinned
+requirements/constraints stay at the verified fourth release. Shared Python
+helpers/mirrors and the three existing gates are unchanged. A new exact source
+freeze, full Linux and actual three-host UI gates, bounded four-DB off-server
+restore, normal changed-main publication and existing update-all/strict/post
+verification are required. Exact final results/revisions/backups are recorded
+in the durable journal and updater transaction. A separate Gym timezone baseline
+is future scope and is not silently claimed fixed by this release.
+
+
+## Separate fifth revision B — 2026-10-24
+
+A remains unpublished and immutable. Its936 Linux tests and24 native functional
+states passed, but same-health repeated refresh shifted notes by up to150 CSSpx
+normally and600 with CSSx2. Root held publication. B changes only canonical
+connections JS/test and these notes on top of the reviewed fifth composition.
+Measured loading-only note reservations plus the short Checking marker avoid
+the old growth/collapse without clipping genuine reason text. Lifecycle cleanup
+invalidates reservations on resize/fonts/render/open/close.
+
+The reviewed overlay has Node23 (previous20 plus3),24 paired asset A/B contexts
+with0 measured displacement for B, one separately waited actual30s interval,
+and independent pointer/error/old-response seams. These are exact synthetic
+asset checks; they are separate from the final B Linux936/native24 acceptance,
+which must be bound to the new freeze before publication. Existing Supply
+historical provenance changes remain unchanged, as do all three native bot
+repositories and their pinned dependencies/mirrors. Publish only the changed
+Core main by normal FF, preserve all other main refs and three existing gates,
+and use fresh four-DB restore-tested backups plus the existing update-all and
+strict verifier. No additional consumer, activation, payment or provider test.

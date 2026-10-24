@@ -5,6 +5,7 @@ import re
 import sqlite3
 import time
 from contextlib import contextmanager
+from bisect import bisect_left, bisect_right
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -250,6 +251,60 @@ def food(db):
     return {'memberships': members, 'entities': entities}
 
 
+def _supply_intake_histories(db, users):
+    """Proven owner intervals only; a current zone cannot date old intakes.
+
+    A first before_zone is not evidence for an unbounded legacy prefix. Load
+    chains once per snapshot, bound by Telegram subject rather than local id.
+    Broken/missing lineage is optional unknown metadata, never a source write.
+    """
+    from shared.timezone_history import zone as owner_zone
+    owners = {str(user['tg_user_id']): uid for uid, user in users.items()}
+    chains = {uid: [] for uid in users}
+    invalid = set()
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE name='progressor_timezone_history'").fetchone():
+        return {}
+    try:
+        rows = db.execute('SELECT user_id,changed_at,before_zone,after_zone FROM progressor_timezone_history ORDER BY user_id,changed_at')
+        for row in rows:
+            uid = owners.get(row['user_id'])
+            if uid is None:
+                continue
+            stamp, before, after = row['changed_at'], row['before_zone'], row['after_zone']
+            try:
+                if type(stamp) not in (int, float) or not math.isfinite(stamp) or stamp < 0 or before == after:
+                    raise ValueError('invalid_owner_transition')
+                owner_zone(before); owner_zone(after)
+                if chains[uid] and (stamp <= chains[uid][-1][0] or before != chains[uid][-1][2]):
+                    raise ValueError('broken_owner_transition')
+                chains[uid].append((stamp, before, after))
+            except (ValueError, TypeError, KeyError, OverflowError):
+                invalid.add(uid)
+    except sqlite3.Error:
+        return {}
+    return {uid: (tuple(row[0] for row in chain), tuple(row[2] for row in chain))
+            for uid, chain in chains.items() if chain and uid not in invalid
+            and chain[-1][2] == users[uid]['tz_name']}
+
+
+def _supply_intake_timezone(history, occurred_at):
+    """Unknown prefix/cutover second stays explicit; never default it to UTC."""
+    unknown = {'timezone_basis': 'not_recorded'}
+    if not history:
+        return unknown
+    times, zones = history
+    stamp = datetime.fromisoformat(occurred_at.replace('Z', '+00:00')).timestamp()
+    interval = bisect_right(times, stamp) - 1
+    if interval < 0:
+        return unknown
+    # Native SQLite created_at records seconds. A transition inside that saved
+    # second has no proven before/after order, even if its ledger has fractions.
+    cutover = bisect_left(times, stamp)
+    if cutover < len(times) and times[cutover] < stamp + 1:
+        return unknown
+    return {'timezone': zones[interval], 'timezone_basis': 'owner_transition_ledger'}
+
+
 def supply(db):
     # Domain functions take Telegram ids but convert to users.id before these SQL writes.
     users = {row['id']: dict(row) for row in db.execute("SELECT * FROM users WHERE COALESCE(is_banned,0)=0 AND COALESCE(deleted_at_utc,'')='' ")}
@@ -257,6 +312,7 @@ def supply(db):
     entities = []
     from .owner_policy import parse_supply_metadata
     owner_consent=parse_supply_metadata(db,users)
+    intake_histories = _supply_intake_histories(db, users)
     for uid, user in users.items():
         tz = user['tz_name'] or 'UTC'
         zone(tz)
@@ -278,7 +334,8 @@ def supply(db):
         try: doses=json.loads(row['dose_snapshot_json'] or '[]') if 'dose_snapshot_json' in row.keys() else []
         except (TypeError,ValueError): doses=[]
         doses=[str(d)[:256] for d in doses[:10]] if isinstance(doses,list) else []
-        entities.append(entity('intake:' + str(row['user_id']) + ':' + str(row['supplement_id']) + ':' + row['day'], user['tg_user_id'], 'supplement.taken', instant(row['created_at']), source_local_date=row['day'], timezone=user['tz_name'] or 'UTC', supplement_id=str(row['supplement_id']), name=supplement_names.get(row['supplement_id'],'Добавка'), status=row['status'], reported_doses=doses, dose_basis='historical_source_snapshot; unparsed_amounts'))
+        recorded = instant(row['created_at'])
+        entities.append(entity('intake:' + str(row['user_id']) + ':' + str(row['supplement_id']) + ':' + row['day'], user['tg_user_id'], 'supplement.taken', recorded, source_local_date=row['day'], **_supply_intake_timezone(intake_histories.get(row['user_id']), recorded), supplement_id=str(row['supplement_id']), name=supplement_names.get(row['supplement_id'],'Добавка'), status=row['status'], reported_doses=doses, dose_basis='historical_source_snapshot; unparsed_amounts'))
     if db.execute("SELECT 1 FROM sqlite_master WHERE name='user_health_profile'").fetchone():
         for row in db.execute('SELECT * FROM user_health_profile'):
             user=users.get(row['user_id'])

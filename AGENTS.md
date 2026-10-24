@@ -74,3 +74,38 @@ The exact combined source B passed 863 Linux tests through composed byte-verifie
 `shared/ai_cache.py` is canonical and must match all three bot mirrors. Its optional keyword-only `publish_if(connection)` is trusted synchronous owner code, evaluated inside the existing `BEGIN IMMEDIATE` before cache cleanup, insertion or eviction. It must only read that connection; no network, asynchronous work or nested cache connection. A false predicate leaves cache entries unchanged. Default callers retain the existing bounded cache behavior.
 
 Food captures its native data-reset revision before photo/text analysis or voice transcription, includes it in cache identity, and checks it again inside the cache write and native meal transaction before duplicate lookup or meal/nutrient/request/debit writes. A late pre-reset result must never recreate erased data or charge a new request. Ordinary cache hits still require native access/quota/attempt guards. Food owns its bounded photo metadata, explicit resume and current menu; Core does not receive drafts or images. Review [Food recovery](https://github.com/MarkKoro/food_bot/blob/main/docs/PHOTO_RECOVERY.md) and its fault-injection tests before changing this boundary. No new readiness gate or consumer is introduced.
+
+Read docs/SUPPLY_INTAKE_TIMEZONES.md before changing historical Supply event zones.
+Keep source day/recorded UTC/dose/identity unchanged. Only continuous owner ledger
+intervals after the first transition prove timezone; missing/legacy/cutover-second
+lineage stays omitted with timezone_basis=not_recorded. Current profile timezone
+still controls today's clock. This resolver is Core-local, not a shared mirror.
+
+
+## Current source participation and settings request ownership
+
+Canonical shared/connections.v1.js distinguishes saved source preferences from
+current target-context Today readiness. The checkbox never grants access or
+accepts legal documents. Keep current/loading/unknown/unsaved states explicit;
+do not reuse the settings GET health after a preferences POST.
+Settings completion belongs to its request and open/render generation. Pending
+preferences saves own their captured input/select fields while Close remains
+available. The eight-second client acknowledgement budget is not server commit
+cancellation: never automatically retry an unconfirmed write. Keep explicit
+read-only retry and current409 draft protection. Run the whole-asset regression
+`node tests/test_connection_readiness.cjs` for changes to this boundary, alongside
+the explicit Linux deploy/run_core_checks.py entry. Node is a test tool, not a
+new production dependency. No bot copies of this shared UI should be created.
+
+
+## Stable participation refresh layout — revision B
+
+During an already loaded participation refresh, batch-read every note height
+before DOM writes, reserve that note's measured border-box minimum height only
+while loading, and show the short honest Checking marker. Never clip reasons or
+use a fixed large height. Success/error restore natural layout; viewport/font
+changes invalidate old pixel reservations. Render/open/close dispose their own
+listeners and old reservations. Keep view/request ownership, draft/focus and the
+eight-second settings acknowledgement contracts. Canonical whole-asset Node23
+includes the previous20 response guards plus3 layout/lifecycle cases. Browser
+geometry uses a project tolerance of1 CSSpx, not a human-usability threshold.

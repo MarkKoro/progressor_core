@@ -26,7 +26,8 @@ def record(db,event,previous):
         kind='workout';body={'before_sets':old.get('strength_sets'),'after_sets':p.get('strength_sets'),'date':p.get('source_local_date')}
     elif event['event_type']=='daily_nutrition.updated' and old.get('totals')!=p.get('totals'):
         kind='food';body={'date':p.get('source_local_date'),'before':old.get('totals'),'after':p.get('totals')}
-    elif p.get('profile_kind') is None and old.get('timezone')!=p.get('timezone') and p.get('timezone'):
+    elif (event['event_type']=='profile.updated' and p.get('entity_id','').startswith('profile:')
+          and p.get('profile_kind') is None and old.get('timezone')!=p.get('timezone') and p.get('timezone')):
         kind='timezone';body={'before':old.get('timezone'),'after':p['timezone']}
     if kind:
         stamp=time.time();body.update(event_id=event['event_id'],occurred_at=event['occurred_at'])

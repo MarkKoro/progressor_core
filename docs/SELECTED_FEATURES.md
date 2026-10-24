@@ -71,3 +71,16 @@ Food sender единственный, opt-in/тихие часы/≤1 в мес�
 Временные SQLite и dummy providers; функциональные owner/history/CAS/consent/cache/coach/reminder tests. Браузер — реальные локальные HTML/API с synthetic Telegram SDK; не физический Telegram/iPhone и не настоящий платёж. Результаты, archive SHA и выпуск — в docs/WORK_LOG.md и местном ACTION_JOURNAL.md.
 
 Перед switch: свежая bounded consistent backup4DB/code/privateconfig/gate + off-server SHA/restore. Main4 normal FF без reset Food live trackedDB. Existing update-all, isolated runtime/pip checks, drain paid workers, rollback code/runtime preserves subsequent writes and protocol2. Затем9units,4DB integrity,3private exportsfresh,gate2,oneconsumer и postbackup. Не начинать новый финальный финансовый период в тестах.
+
+
+## Historical Supply timezone metadata
+
+K28 also preserves Supply historical intake provenance in the canonical read
+adapter. Source day/recorded UTC/identity/dose/status stay unchanged. Only a
+continuous owner transition ledger after its first recorded change can prove a
+timezone interval; legacy prefix, missing/broken history and an ambiguous saved
+cutover second omit timezone with timezone_basis=not_recorded. Current profile
+timezone still controls today's clock. See SUPPLY_INTAKE_TIMEZONES.md. This adds
+no source write, consumed_at model, shared helper mirror or readiness gate.
+Historical metadata repair is not a current account timezone change; that notice
+requires a base profile.updated entity. Genuine profile edits still qualify.

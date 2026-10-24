@@ -3,7 +3,7 @@
   'use strict';
   const source=document.currentScript?.dataset.progressorSource;
   const names={food:'Food',gym:'Gym Diary',supply:'Supply'};
-  let dialog,content,notice,opener,current,busy=false,todayReload;
+  let dialog,content,notice,opener,current,busy=false,todayReload,viewGeneration=0,settingsRequest=0,openRequest=0,disposeReadiness;
   const el=(tag,text,parent)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(parent)parent.append(n);return n;};
   async function api(path,body,signal){
     let r;
@@ -17,18 +17,45 @@
   function button(label,parent,action){const b=el('button',label,parent);b.type='button';b.addEventListener('click',async()=>{if(busy)return;busy=true;b.disabled=true;notice.textContent='';try{await action();}catch(e){notice.textContent=String(e.message||e);if(e.status===409)button('Обновить данные',notice,refresh);}finally{busy=false;b.disabled=false;}});return b;}
   function toggle(label,parent,value){const row=el('label',undefined,parent);row.className='link-toggle';const check=el('input',undefined,row);check.type='checkbox';check.checked=!!value;el('span',label,row);return check;}
   function section(title,parent){const d=el('details',undefined,parent);el('summary',title,d);return d;}
-  async function refresh(){current=await api('');render();}
-  async function save(patch){const value=await api('',{action:'preferences',revision:current.preferences.revision,patch});current.preferences=value.preferences;render();notice.textContent='Настройки сохранены.';}
-  function todaySection(parent){
+  const settingsCurrent=(request,generation)=>request===settingsRequest&&generation===viewGeneration&&dialog?.open;
+  async function refresh(){
+    const request=++settingsRequest,generation=viewGeneration;
+    const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),8000);
+    try{
+      let value;
+      try{value=await api('',undefined,controller.signal);}catch(e){if(!settingsCurrent(request,generation))return false;throw e;}
+      if(!settingsCurrent(request,generation))return false;
+      current=value;render();return true;
+    }finally{clearTimeout(timeout);}
+  }
+  async function save(patch){
+    const request=++settingsRequest,generation=viewGeneration;
+    const owned=[...content.querySelectorAll('input,select')].map(field=>({field,disabled:field.disabled}));
+    for(const {field} of owned)field.disabled=true;
+    const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),8000);
+    try{
+      let value;
+      try{value=await api('',{action:'preferences',revision:current.preferences.revision,patch},controller.signal);}
+      catch(e){if(!settingsCurrent(request,generation))return false;throw e;}
+      if(!settingsCurrent(request,generation))return false;
+      current.preferences=value.preferences;render();notice.textContent='Настройки сохранены.';return true;
+    }finally{
+      clearTimeout(timeout);
+      for(const {field,disabled} of owned)if(field.isConnected&&generation===viewGeneration)field.disabled=disabled;
+    }
+  }
+  function todaySection(parent,participation,generation){
     const overview=section('Сегодня вместе',parent);overview.open=true;overview.dataset.todayOverview='';
     const result=el('div',undefined,overview);const state=el('p','Собираем сохранённые записи…',overview);state.setAttribute('role','status');
     let loading=false;
+    const isCurrent=()=>generation===viewGeneration&&overview.isConnected&&dialog?.open;
     const load=async()=>{
-      if(loading||!overview.isConnected||!dialog?.open)return;
+      if(loading||!isCurrent())return;
+      participation('loading');
       loading=true;const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),2500);
       try{
         const v=await api('/today?target='+encodeURIComponent(source),undefined,controller.signal);
-        if(!overview.isConnected||!dialog?.open)return;
+        if(!isCurrent())return;
         const healthOpen=result.querySelector('details')?.open||false;result.replaceChildren();
         for(const item of v.sections){const row=el('div',undefined,result);el('strong',item.name,row);el('p',item.text,row);if(item.source==='supply')el('small',item.day+' · '+item.timezone,row);}
         if(v.relationship)el('p',v.relationship,result);
@@ -39,19 +66,53 @@
         if(!v.health.notifications_enabled)el('p','Обычные напоминания выключены.',health);
         el('small',v.day_label,result);el('small',v.coverage,result);
         state.textContent='Данные на '+new Date(v.generated_at).toLocaleTimeString('ru-RU');result.dataset.fresh='true';
-      }catch(e){if(overview.isConnected&&dialog?.open){state.textContent='Обзор сейчас не обновился. '+(result.childElementCount?'Ниже показан предыдущий результат. ':'')+'Текущий продукт продолжает работать. Попробуйте обновить ещё раз.';result.dataset.fresh='false';}}
+        participation('current',v.health.items);
+      }catch(e){if(isCurrent()){participation('unavailable');state.textContent='Обзор сейчас не обновился. '+(result.childElementCount?'Ниже показан предыдущий результат. ':'')+'Текущий продукт продолжает работать. Попробуйте обновить ещё раз.';result.dataset.fresh='false';}}
       finally{clearTimeout(timeout);loading=false;}
     };
     button('Обновить обзор дня',overview,load);todayReload=load;void load();
   }
   function render(){
+    disposeReadiness?.();disposeReadiness=undefined;
     const focus=document.activeElement?.dataset?.linkField;content.replaceChildren();const p=current.preferences;
     el('p',p.rest_active?'Сейчас отдых. Напоминания и автоматические подсказки приостановлены. Срок подписки продолжается.':'Вы выбираете, какие продукты помогают друг другу. Записи остаются у каждого продукта.',content);
-    todaySection(content);
+    const generation=++viewGeneration,readiness=new Map();
+    const knownStatuses=new Set(['ready','paused','disabled','not_connected','access_required','target_unavailable','consent_required','policy_unavailable','stale','unavailable']);
+    let participationState='loading',healthItems=[];
+    const updateParticipation=(state,items=[])=>{
+      participationState=state;healthItems=Array.isArray(items)?items:[];
+      const heights=state==='loading'?new Map([...readiness].map(([s,row])=>[s,row.note.getBoundingClientRect().height])):null;
+      for(const [s,row] of readiness){
+        if(!row.note.isConnected||generation!==viewGeneration||!dialog?.open)continue;
+        const item=healthItems.find(v=>v?.source===s),height=heights?.get(s);
+        row.note.style.minHeight=Number.isFinite(height)&&height>0?height+'px':'';
+        row.note.replaceChildren();
+        if(row.check.checked!==!!p.sources[s])row.note.textContent='Изменение не сохранено. Нажмите «Сохранить связи».';
+        else if(state==='loading')row.note.textContent='Проверяем…';
+        else if(state!=='current'||!knownStatuses.has(item?.status)||typeof item.label!=='string'||!item.label||typeof item.message!=='string')row.note.textContent='Сейчас не удалось проверить участие данных. Обновите обзор дня.';
+        else{
+          el('span','Сейчас: '+item.label,row.note);
+          if(item.status!=='ready')el('span',item.status==='consent_required'?'Откройте Supply в боте и подтвердите актуальные условия и политику конфиденциальности.':item.message,row.note);
+        }
+      }
+    };
+    todaySection(content,updateParticipation,generation);
     const rest=el('div',undefined,content);rest.className='link-actions';
     button(p.rest_active?'Вернуться к обычному режиму':'Отдохнуть от напоминаний',rest,()=>save({paused:!p.rest_active,pause_until:null}));
     const connections=section('Связи и напоминания',content);connections.open=true;
-    const sources={};for(const s of ['food','gym','supply'])sources[s]=toggle(names[s]+' участвует в связях',connections,p.sources[s]);
+    el('small','Галочки — ваш сохранённый выбор. Участие данных сейчас показано отдельно.',connections);
+    const sources={};for(const s of ['food','gym','supply']){
+      const row=el('div',undefined,connections);row.className='link-source';
+      const check=sources[s]=toggle(names[s]+' участвует в связях',row,p.sources[s]);
+      const note=el('small','Проверяем…',row);note.id='progressor-source-readiness-'+s;note.dataset.sourceReadiness=s;
+      check.setAttribute('aria-describedby',note.id);readiness.set(s,{check,note});
+      note.style.boxSizing='border-box';
+      check.addEventListener('change',()=>updateParticipation(participationState,healthItems));
+    }
+    const clearReservation=()=>{for(const {note} of readiness.values())note.style.minHeight='';};
+    const invalidateReservation=()=>{if(generation===viewGeneration)clearReservation();};
+    window.addEventListener('resize',invalidateReservation);document.fonts?.addEventListener('loadingdone',invalidateReservation);
+    disposeReadiness=()=>{window.removeEventListener('resize',invalidateReservation);document.fonts?.removeEventListener('loadingdone',invalidateReservation);clearReservation();};
     const hints=toggle('Подсказки в приложениях',connections,p.hints);
     const notifications=toggle('Обычные напоминания во всех продуктах',connections,p.notifications);
     const weight=toggle('Food напоминает проверить цель после нового веса Supply',connections,p.weight_notifications);
@@ -189,10 +250,10 @@
       const heading=el('div',undefined,dialog);heading.className='link-heading';el('h2','Связь продуктов',heading).id='progressor-link-title';
       const close=el('button','×',heading);close.type='button';close.setAttribute('aria-label','Закрыть');close.addEventListener('click',()=>dialog.close());
       notice=el('p',undefined,dialog);notice.setAttribute('role','status');content=el('div',undefined,dialog);
-      el('style','#progressor-connections .link-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}#progressor-connections .link-heading h2{min-width:0;margin:0;overflow-wrap:anywhere}#progressor-connections .link-heading button{flex:none;min-width:44px}',document.head);
+      el('style','#progressor-connections [data-source-readiness] span{display:block}#progressor-connections .link-source{margin-bottom:10px}#progressor-connections .link-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}#progressor-connections .link-heading h2{min-width:0;margin:0;overflow-wrap:anywhere}#progressor-connections .link-heading button{flex:none;min-width:44px}',document.head);
       // Host card colors can be translucent; the modal needs an opaque surface.
       el('style','#progressor-connections{background:#14213d;color:#f1f5f9}#progressor-connections button,#progressor-connections select{background:#243657;color:#f1f5f9;border-color:#64748b}#progressor-connections,#progressor-connections *{font-family:system-ui,-apple-system,"Segoe UI",sans-serif!important}#progressor-connections input:not([type=checkbox]){box-sizing:border-box;max-width:100%;min-height:44px;padding:8px;border:1px solid #64748b;border-radius:8px;background:#243657;color:#f1f5f9}',document.head);
-      dialog.addEventListener('close',()=>opener?.focus());
+      dialog.addEventListener('close',()=>{disposeReadiness?.();disposeReadiness=undefined;viewGeneration++;openRequest++;opener?.focus();});
       dialog.addEventListener('keydown',event=>{
         if(event.key!=='Tab')return;
         const controls=[...dialog.querySelectorAll('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary,[tabindex="0"]')].filter(n=>n.getClientRects().length&&!n.closest('[hidden]'));
@@ -202,11 +263,18 @@
         else if(!event.shiftKey&&(document.activeElement===last||!dialog.contains(document.activeElement))){event.preventDefault();first.focus();}
       });
     }
+    const generation=++viewGeneration,opening=++openRequest;
+    disposeReadiness?.();disposeReadiness=undefined;content.replaceChildren();todayReload=null;
     document.dispatchEvent(new Event('progressor:overlay-open'));
     if(!dialog.open)dialog.showModal();notice.textContent='Загружаем ваши настройки…';
-    try{await window.Progressor?.ready;await refresh();notice.textContent='';
+    try{await window.Progressor?.ready;if(generation!==viewGeneration||!dialog?.open)return;if(!await refresh())return;notice.textContent='';
       if(dialog.open)content.querySelector('summary,button,input,select')?.focus();
-    }catch(e){notice.textContent=e.message;}
+    }catch(e){
+      if(opening!==openRequest||!dialog?.open)return;
+      notice.textContent=e.message;
+      const retry=el('button','Повторить загрузку настроек',notice);retry.type='button';
+      retry.addEventListener('click',()=>void open());retry.focus();
+    }
   }
   window.Progressor=window.Progressor||{};window.Progressor.openConnections=open;
   document.addEventListener('progressor:open-connections',open);
