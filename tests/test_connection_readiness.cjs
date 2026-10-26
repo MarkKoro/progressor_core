@@ -64,6 +64,26 @@ function harness(){
  const fireTimeout=ms=>{const active=timers.filter(t=>t.active&&t.ms===ms);assert.equal(active.length,1,'one owned timeout');for(const t of active){t.active=false;t.fn();}};
  return {document,window,launcher,requests,note,input,toggle,flush,take,open,fireTimeout,notes:()=>document.body.querySelectorAll('[data-source-readiness]'),closeButton:()=>findButton('×'),close:()=>document.body.querySelector('#progressor-connections').close(),click:text=>{const button=findButton(text);assert.ok(button,'button '+text);return button.dispatchEvent({type:'click'});}};
 }
+
+// These preference cases exercise public UI/partial-request boundaries, not a
+// copy of the draft implementation. Captured real-B values are replayed separately.
+function draftSettings(){const value=settings();Object.assign(value.preferences,{sources:{gym:true,food:true,supply:true},hints:true,notifications:true,weight_notifications:false,goal_links:true,weekly_plan:true,weekly_day:'monday',weekly_hour:10,diet:'any',excluded_food_groups:[],day_prompt:true,paused:false,pause_until:null});value.food_groups=['fish','eggs'];return value;}
+function draftToday(p){const value=today(p.rest_active?'paused':p.sources.supply===false?'disabled':'ready');value.health.hints_enabled=!!p.hints;value.health.notifications_enabled=!!p.notifications;return value;}
+function preferenceControls(h){
+ const all=n=>[n,...n.children.flatMap(all)],section=title=>all(h.document.body).find(n=>n.tagName==='details'&&n.children[0]?.textContent===title);
+ const weekly=section('Один план питания в неделю'),food=section('Пищевые предпочтения'),day=section('Итог дня без обязательных отметок');
+ return {source:h.input(),weekly:weekly.querySelector('input'),weekday:weekly.querySelectorAll('select')[0],hour:weekly.querySelectorAll('select')[1],diet:food.querySelector('select'),fish:all(food).find(n=>n.tagName==='label'&&n.textContent==='Исключить: Рыба')?.querySelector('input'),day:day?.querySelector('input')};
+}
+const noticeText=h=>h.document.body.querySelector('#progressor-connections').children.find(n=>n.tagName==='p'&&n.getAttribute('role')==='status').textContent;
+const connectionKeys=['sources','hints','notifications','weight_notifications','goal_links','frequency'];
+async function confirmPreferences(h,label,server,keys,beforeFresh){
+ const saving=h.click(label);await h.flush();const post=h.take('POST'),body=JSON.parse(post.options.body);
+ assert.equal(body.action,'preferences');assert.equal(body.revision,server.revision);assert.deepEqual(Object.keys(body.patch).sort(),[...keys].sort());
+ const next={...clone(server),...clone(body.patch),revision:server.revision+1};next.rest_active=!!next.paused;
+ post.reply({preferences:next});await saving;await h.flush();if(beforeFresh)beforeFresh();h.take('GET','/today?target=food').reply(draftToday(next));await h.flush();assert.equal(h.requests.length,0);
+ return {next,body};
+}
+
 async function main(){const passed=[];async function test(name,fn){await fn();passed.push(name);}
  for(const status of ['stale','consent_required','access_required','ready','disabled','paused','future_status'])await test('inline '+status,async()=>{
   const h=harness(),enabled=status!=='disabled';await h.open(settings(enabled),today(status));assert.equal(h.input().checked,enabled);
@@ -144,6 +164,50 @@ async function main(){const passed=[];async function test(name,fn){await fn();pa
   const fonts=h.click('Обновить обзор дня');await h.flush();assert.ok(h.note().style.minHeight);h.document.fonts.dispatchEvent({type:'loadingdone'});assert.equal(h.note().style.minHeight,'');h.take('GET','/today?target=food').reply(today());await fonts;
   h.close();assert.equal(h.window.listeners.resize.length,0);assert.equal(h.document.fonts.listeners.loadingdone.length,0);await h.open();assert.equal(h.window.listeners.resize.length,1);
  });
+
+ await test('unrelated dirty source survives a weekly-only acknowledgement',async()=>{
+  const h=harness(),value=draftSettings();await h.open(value,draftToday(value.preferences));h.toggle(false);preferenceControls(h).hour.value=12;
+  const {next}=await confirmPreferences(h,'Сохранить время сводки',value.preferences,['weekly_plan','weekly_day','weekly_hour'],()=>{assert.equal(h.input().checked,false);assert.equal(h.note().textContent,unsaved);});
+  assert.equal(next.sources.supply,true);assert.equal(next.weekly_hour,12);assert.equal(Number(preferenceControls(h).hour.value),12);assert.equal(h.input().checked,false);assert.equal(h.note().textContent,unsaved);assert.ok(noticeText(h).includes('В других разделах есть несохранённые изменения'));
+ });
+ await test('weekly draft survives connections save and next scoped save uses acknowledged revision',async()=>{
+  const h=harness(),value=draftSettings();await h.open(value,draftToday(value.preferences));preferenceControls(h).weekly.checked=false;preferenceControls(h).weekday.value='sunday';preferenceControls(h).hour.value=13;h.toggle(false);
+  const first=await confirmPreferences(h,'Сохранить связи',value.preferences,connectionKeys);assert.equal(first.next.weekly_plan,true);assert.equal(first.next.weekly_hour,10);assert.equal(preferenceControls(h).weekly.checked,false);assert.equal(preferenceControls(h).weekday.value,'sunday');assert.equal(Number(preferenceControls(h).hour.value),13);assert.equal(h.input().checked,false);assert.ok(noticeText(h).includes('несохранённые'));
+  const second=await confirmPreferences(h,'Сохранить время сводки',first.next,['weekly_plan','weekly_day','weekly_hour']);assert.equal(second.body.revision,1);assert.equal(second.next.weekly_plan,false);assert.equal(second.next.weekly_hour,13);assert.equal(noticeText(h),'Настройки сохранены.');
+ });
+ await test('diet and exclusions survive connections save without leaking into its patch',async()=>{
+  const h=harness(),value=draftSettings();await h.open(value,draftToday(value.preferences));preferenceControls(h).diet.value='vegan';preferenceControls(h).fish.checked=true;h.toggle(false);
+  const first=await confirmPreferences(h,'Сохранить связи',value.preferences,connectionKeys);assert.equal(first.next.diet,'any');assert.deepEqual(first.next.excluded_food_groups,[]);assert.equal(preferenceControls(h).diet.value,'vegan');assert.equal(preferenceControls(h).fish.checked,true);assert.ok(noticeText(h).includes('несохранённые'));
+  const second=await confirmPreferences(h,'Сохранить предпочтения',first.next,['diet','excluded_food_groups']);assert.equal(second.next.diet,'vegan');assert.deepEqual(second.next.excluded_food_groups,['fish']);assert.equal(noticeText(h),'Настройки сохранены.');
+ });
+ await test('false and cleared exclusion drafts survive a rest acknowledgement',async()=>{
+  const h=harness(),value=draftSettings();value.preferences.excluded_food_groups=['fish'];await h.open(value,draftToday(value.preferences));preferenceControls(h).weekly.checked=false;preferenceControls(h).fish.checked=false;preferenceControls(h).day.checked=false;h.toggle(false);
+  const {next}=await confirmPreferences(h,'Отдохнуть от напоминаний',value.preferences,['paused','pause_until']);assert.equal(next.paused,true);assert.equal(next.rest_active,true);assert.equal(next.weekly_plan,true);assert.deepEqual(next.excluded_food_groups,['fish']);assert.equal(next.day_prompt,true);assert.equal(preferenceControls(h).weekly.checked,false);assert.equal(preferenceControls(h).fish.checked,false);assert.equal(preferenceControls(h).day.checked,false);assert.equal(h.input().checked,false);assert.equal(h.note().textContent,unsaved);assert.ok(h.document.body.textContent.includes('Сейчас отдых.'));assert.ok(noticeText(h).includes('несохранённые'));
+ });
+ await test('day-question-only save preserves weekly and food drafts',async()=>{
+  const h=harness(),value=draftSettings();await h.open(value,draftToday(value.preferences));preferenceControls(h).hour.value=14;preferenceControls(h).diet.value='vegetarian';preferenceControls(h).day.checked=false;
+  const {next}=await confirmPreferences(h,'Сохранить настройку вопроса',value.preferences,['day_prompt']);assert.equal(next.day_prompt,false);assert.equal(next.weekly_hour,10);assert.equal(next.diet,'any');assert.equal(Number(preferenceControls(h).hour.value),14);assert.equal(preferenceControls(h).diet.value,'vegetarian');assert.equal(preferenceControls(h).day.checked,false);assert.ok(noticeText(h).includes('несохранённые'));
+ });
+ await test('display defaults and unordered sets do not create phantom remaining drafts',async()=>{
+  for(const value of [settings(),draftSettings()]){if(value.food_groups.length)value.preferences.excluded_food_groups=['eggs','fish'];const h=harness();await h.open(value,draftToday(value.preferences));preferenceControls(h).hour.value=11;await confirmPreferences(h,'Сохранить время сводки',value.preferences,['weekly_plan','weekly_day','weekly_hour']);assert.equal(noticeText(h),'Настройки сохранены.');}
+ });
+ await test('a reverted draft is not advertised as remaining after another save',async()=>{
+  const h=harness(),value=draftSettings();await h.open(value,draftToday(value.preferences));h.toggle(false);h.toggle(true);preferenceControls(h).hour.value=11;await confirmPreferences(h,'Сохранить время сводки',value.preferences,['weekly_plan','weekly_day','weekly_hour']);assert.equal(h.input().checked,true);assert.equal(noticeText(h),'Настройки сохранены.');
+ });
+ await test('failed partial save leaves every pending preference and fields usable',async()=>{
+  const h=harness(),value=draftSettings();await h.open(value,draftToday(value.preferences));h.toggle(false);preferenceControls(h).hour.value=12;preferenceControls(h).diet.value='vegan';const saving=h.click('Сохранить время сводки');await h.flush();h.take('POST').reply({},503);await saving;await h.flush();assert.equal(h.input().checked,false);assert.equal(h.input().disabled,false);assert.equal(Number(preferenceControls(h).hour.value),12);assert.equal(preferenceControls(h).diet.value,'vegan');assert.equal(h.requests.length,0);assert.ok(!noticeText(h).includes('Настройки сохранены'));
+ });
+ await test('409 preserves all preference drafts and explicit refresh still resets them',async()=>{
+  const h=harness(),value=draftSettings();await h.open(value,draftToday(value.preferences));h.toggle(false);preferenceControls(h).hour.value=12;preferenceControls(h).diet.value='vegan';const saving=h.click('Сохранить время сводки');await h.flush();h.take('POST').reply({},409);await saving;await h.flush();assert.equal(h.input().checked,false);assert.equal(Number(preferenceControls(h).hour.value),12);assert.equal(preferenceControls(h).diet.value,'vegan');assert.ok(noticeText(h).includes('сбросит несохранённый выбор'));
+  const fresh=h.click('Обновить данные');await h.flush();h.take().reply(value);await fresh;await h.flush();h.take('GET','/today?target=food').reply(draftToday(value.preferences));await h.flush();assert.equal(h.input().checked,true);assert.equal(Number(preferenceControls(h).hour.value),10);assert.equal(preferenceControls(h).diet.value,'any');
+ });
+ await test('unconfirmed partial write never acknowledges or loses other drafts',async()=>{
+  const h=harness(),value=draftSettings();await h.open(value,draftToday(value.preferences));h.toggle(false);preferenceControls(h).hour.value=12;preferenceControls(h).diet.value='vegan';const saving=h.click('Сохранить время сводки');await h.flush();const old=h.take('POST');h.fireTimeout(8000);await saving;await h.flush();old.reply({preferences:{...value.preferences,weekly_hour:12,revision:1}});await h.flush();assert.equal(h.input().checked,false);assert.equal(h.input().disabled,false);assert.equal(Number(preferenceControls(h).hour.value),12);assert.equal(preferenceControls(h).diet.value,'vegan');assert.ok(noticeText(h).includes('Не удалось получить подтверждение'));assert.equal(h.requests.length,0);
+ });
+ for(const failure of [false,true])await test('old partial '+(failure?'failure':'success')+' cannot reapply captured drafts to reopened view',async()=>{
+  const h=harness(),value=draftSettings();await h.open(value,draftToday(value.preferences));h.toggle(false);preferenceControls(h).hour.value=12;const saving=h.click('Сохранить время сводки');await h.flush();const old=h.take('POST');h.close();await h.open(value,draftToday(value.preferences));preferenceControls(h).diet.value='vegan';preferenceControls(h).hour.value=14;old.reply({preferences:{...value.preferences,weekly_hour:12,revision:1}},failure?503:200);await saving;await h.flush();assert.equal(h.input().checked,true);assert.equal(Number(preferenceControls(h).hour.value),14);assert.equal(preferenceControls(h).diet.value,'vegan');assert.equal(h.input().disabled,false);assert.equal(h.requests.length,0);
+ });
+
  console.log(JSON.stringify({passed:true,cases:passed.length,names:passed,network_or_provider_calls:0,scope:'Whole canonical asset, deterministic DOM/event/request seam only'}));
 }
 main().catch(error=>{console.error(error);process.exitCode=1;});

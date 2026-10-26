@@ -288,3 +288,26 @@ repositories and their pinned dependencies/mirrors. Publish only the changed
 Core main by normal FF, preserve all other main refs and three existing gates,
 and use fresh four-DB restore-tested backups plus the existing update-all and
 strict verifier. No additional consumer, activation, payment or provider test.
+
+
+## Sixth preference-draft composition — 2026-10-24
+
+Based on completed B Core83ace5c4 with unchanged three bot refs. Three controlled
+whole-asset partial-save routes reproduced unrelated local draft loss while
+each intended own-section acknowledgement succeeded; these are three routes
+with positive conditions, not six independent cases. The exact false baseline
+remains retained. A minimal canonical preference registry preserves unrelated
+dirty keys across successful partial saves and reports partial success honestly.
+Server preferences, write keys, revision, errors, explicit refresh/discard,
+request/view ownership and eight-second unknown-write handling remain intact.
+
+Owner held Node35 keeps all previous23 cases and adds12 preference boundaries;
+the captured three-route replay passes on the held asset. Independent review,
+new frozen Node/Linux/native acceptance and normal rollout are bound in the
+durable journal. Planned native acceptance has24 read-only geometry states and
+13 owned Core-preference write states (9cross-section routes,3rest,1Food day
+prompt),37 mixed states; they must never be called37 read-only checks. Journals
+and paid projections stay unchanged. No native source/dependency/helper, payment,
+consumer, gate or H08-D change belongs here. Only the three documentation notes
+and canonical JS/CJS differ; final source/gates must precede publication, fresh
+four-DB off-server backup restores, existing update-all/strict and postbackup.

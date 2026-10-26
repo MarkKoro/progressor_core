@@ -89,3 +89,26 @@ timer case are synthetic browser evidence; the final frozen composition also
 requires its own actual three-host checks. Neither is physical Telegram or a
 human comprehension study. Exact source-bound results live in the durable
 release journal; no result from A is renamed as B.
+
+
+## Saving one preference section preserves the others — 2026-10-24
+
+A controlled whole-asset baseline reproduced three local draft losses: saving
+weekly settings reset an unsaved source checkbox, and saving connections reset
+unsaved weekly time or diet/exclusions. Each intended partial server patch was
+correct; the subsequent whole-form render lost the unrelated local choice.
+
+The canonical renderer now registers displayed preference values per render.
+Before save(patch), it snapshots only dirty keys outside that patch. A current
+successful response remains the authoritative server baseline; rerender then
+restores only those unrelated drafts. A scoped success message states when
+other sections still have unsaved changes. Sources restored as drafts retain
+their unsaved explanation; a later explicit own save uses the new revision.
+This never sends the other section in a partial POST or saves it implicitly.
+
+Registry state is view-local and cleared on open/close. Explicit409 refresh still
+discards local choices under its existing warning. Error/unconfirmed write,
+eight-second acknowledgement, old response/reopen and loading geometry rules
+are unchanged. Food's day prompt appears only in Food. Coach/rhythm api()+refresh,
+timezone/atlas/native editors, persistent exit and navigation design are outside
+this bounded correction. No backend, legal, entitlement or rest policy changes.

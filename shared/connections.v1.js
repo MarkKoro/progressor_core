@@ -3,7 +3,7 @@
   'use strict';
   const source=document.currentScript?.dataset.progressorSource;
   const names={food:'Food',gym:'Gym Diary',supply:'Supply'};
-  let dialog,content,notice,opener,current,busy=false,todayReload,viewGeneration=0,settingsRequest=0,openRequest=0,disposeReadiness;
+  let dialog,content,notice,opener,current,busy=false,todayReload,viewGeneration=0,settingsRequest=0,openRequest=0,disposeReadiness,preferenceFields=new Map();
   const el=(tag,text,parent)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(parent)parent.append(n);return n;};
   async function api(path,body,signal){
     let r;
@@ -17,6 +17,10 @@
   function button(label,parent,action){const b=el('button',label,parent);b.type='button';b.addEventListener('click',async()=>{if(busy)return;busy=true;b.disabled=true;notice.textContent='';try{await action();}catch(e){notice.textContent=String(e.message||e);if(e.status===409)button('Обновить данные',notice,refresh);}finally{busy=false;b.disabled=false;}});return b;}
   function toggle(label,parent,value){const row=el('label',undefined,parent);row.className='link-toggle';const check=el('input',undefined,row);check.type='checkbox';check.checked=!!value;el('span',label,row);return check;}
   function section(title,parent){const d=el('details',undefined,parent);el('summary',title,d);return d;}
+  const preferenceSignature=value=>JSON.stringify(value,(_,item)=>Array.isArray(item)?[...item].sort():item&&typeof item==='object'?Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))):item);
+  const copyPreference=value=>value===undefined?undefined:JSON.parse(JSON.stringify(value));
+  function preference(key,read,write){preferenceFields.set(key,{read,write,baseline:preferenceSignature(read())});}
+  function dirtyPreferences(exclude={}){return [...preferenceFields].filter(([key,field])=>!Object.hasOwn(exclude,key)&&preferenceSignature(field.read())!==field.baseline).map(([key,field])=>[key,copyPreference(field.read())]);}
   const settingsCurrent=(request,generation)=>request===settingsRequest&&generation===viewGeneration&&dialog?.open;
   async function refresh(){
     const request=++settingsRequest,generation=viewGeneration;
@@ -29,7 +33,7 @@
     }finally{clearTimeout(timeout);}
   }
   async function save(patch){
-    const request=++settingsRequest,generation=viewGeneration;
+    const request=++settingsRequest,generation=viewGeneration,draft=dirtyPreferences(patch);
     const owned=[...content.querySelectorAll('input,select')].map(field=>({field,disabled:field.disabled}));
     for(const {field} of owned)field.disabled=true;
     const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),8000);
@@ -38,7 +42,7 @@
       try{value=await api('',{action:'preferences',revision:current.preferences.revision,patch},controller.signal);}
       catch(e){if(!settingsCurrent(request,generation))return false;throw e;}
       if(!settingsCurrent(request,generation))return false;
-      current.preferences=value.preferences;render();notice.textContent='Настройки сохранены.';return true;
+      current.preferences=value.preferences;const remaining=render(draft);notice.textContent=remaining?'Выбранные настройки сохранены. В других разделах есть несохранённые изменения.':'Настройки сохранены.';return true;
     }finally{
       clearTimeout(timeout);
       for(const {field,disabled} of owned)if(field.isConnected&&generation===viewGeneration)field.disabled=disabled;
@@ -72,8 +76,8 @@
     };
     button('Обновить обзор дня',overview,load);todayReload=load;void load();
   }
-  function render(){
-    disposeReadiness?.();disposeReadiness=undefined;
+  function render(draft=[]){
+    disposeReadiness?.();disposeReadiness=undefined;preferenceFields=new Map();
     const focus=document.activeElement?.dataset?.linkField;content.replaceChildren();const p=current.preferences;
     el('p',p.rest_active?'Сейчас отдых. Напоминания и автоматические подсказки приостановлены. Срок подписки продолжается.':'Вы выбираете, какие продукты помогают друг другу. Записи остаются у каждого продукта.',content);
     const generation=++viewGeneration,readiness=new Map();
@@ -109,6 +113,7 @@
       note.style.boxSizing='border-box';
       check.addEventListener('change',()=>updateParticipation(participationState,healthItems));
     }
+    preference('sources',()=>Object.fromEntries(Object.entries(sources).map(([s,node])=>[s,node.checked])),value=>{for(const [s,node] of Object.entries(sources))node.checked=value[s];});
     const clearReservation=()=>{for(const {note} of readiness.values())note.style.minHeight='';};
     const invalidateReservation=()=>{if(generation===viewGeneration)clearReservation();};
     window.addEventListener('resize',invalidateReservation);document.fonts?.addEventListener('loadingdone',invalidateReservation);
@@ -119,12 +124,17 @@
     const goal=toggle('Предлагать связанные действия после смены цели',connections,p.goal_links);
     const frequency=el('label','Частота подсказок ',connections);const select=el('select',undefined,frequency);
     for(const [v,t] of [['normal','Обычная'],['quiet','Меньше подсказок']]){const o=el('option',t,select);o.value=v;}select.value=p.frequency;
+    for(const [key,node] of [['hints',hints],['notifications',notifications],['weight_notifications',weight],['goal_links',goal]])preference(key,()=>node.checked,value=>{node.checked=value;});
+    preference('frequency',()=>select.value,value=>{select.value=value;});
     button('Сохранить связи',connections,()=>save({sources:Object.fromEntries(Object.entries(sources).map(([s,n])=>[s,n.checked])),hints:hints.checked,notifications:notifications.checked,weight_notifications:weight.checked,goal_links:goal.checked,frequency:select.value}));
     const weekly=section('Один план питания в неделю',content);
     const weeklyOn=toggle('Присылать недельную сводку в Food',weekly,p.weekly_plan);
     const weeklyDay=el('select',undefined,weekly);weeklyDay.setAttribute('aria-label','День сводки');
     for(const [v,t] of [['monday','Понедельник'],['sunday','Воскресенье']]){const o=el('option',t,weeklyDay);o.value=v;}weeklyDay.value=p.weekly_day;
     const hour=el('select',undefined,weekly);hour.setAttribute('aria-label','Час по вашему времени');for(let h=8;h<=20;h++){const o=el('option',String(h).padStart(2,'0')+':00',hour);o.value=h;}hour.value=p.weekly_hour;
+    preference('weekly_plan',()=>weeklyOn.checked,value=>{weeklyOn.checked=value;});
+    preference('weekly_day',()=>weeklyDay.value,value=>{weeklyDay.value=value;});
+    preference('weekly_hour',()=>Number(hour.value),value=>{hour.value=value;});
     el('small','По умолчанию понедельник, 10:00, по часовому поясу уведомлений Food. Всего одно сообщение за неделю; при отдыхе оно не отправляется. Подтверждение полноты дня добровольное.',weekly);
     button('Сохранить время сводки',weekly,()=>save({weekly_plan:weeklyOn.checked,weekly_day:weeklyDay.value,weekly_hour:Number(hour.value)}));
     button('Предпросмотр моей недели',weekly,async()=>{const v=await api('/weekly-plan');weekly.querySelector('[data-plan-preview]')?.remove();const box=el('p',v.text,weekly);box.dataset.planPreview='';box.style.whiteSpace='pre-line';});
@@ -155,6 +165,8 @@
     el('p','Исключения фильтруют пищевые примеры. Состав конкретного товара всегда проверьте на этикетке.',food);
     const groups={};const labels={fish:'Рыба',shellfish:'Моллюски и ракообразные',meat:'Мясо',poultry:'Птица',eggs:'Яйца',dairy:'Молочные продукты',soy:'Соя',nuts:'Орехи',gluten:'Продукты с глютеном',sesame:'Кунжут'};
     for(const g of current.food_groups)groups[g]=toggle('Исключить: '+labels[g],food,p.excluded_food_groups.includes(g));
+    preference('diet',()=>diet.value,value=>{diet.value=value;});
+    preference('excluded_food_groups',()=>Object.entries(groups).filter(([,node])=>node.checked).map(([g])=>g),value=>{for(const [g,node] of Object.entries(groups))node.checked=value.includes(g);});
     button('Сохранить предпочтения',food,()=>save({diet:diet.value,excluded_food_groups:Object.entries(groups).filter(([,n])=>n.checked).map(([g])=>g)}));
     const weights=current.weight.items;
     const profile=section(current.weight.conflict?'Уточнить разный вес в профилях':'Вес и источники профиля',content);
@@ -230,6 +242,7 @@
     if(source==='food'){
       const day=section('Итог дня без обязательных отметок',content);
       const prompt=toggle('Спрашивать о последнем приёме в подходящий вечер',day,p.day_prompt);
+      preference('day_prompt',()=>prompt.checked,value=>{prompt.checked=value;});
       button('Сохранить настройку вопроса',day,()=>save({day_prompt:prompt.checked}));
       button('Посмотреть предварительный итог',day,async()=>{const response=await fetch('/api/day-status',{cache:'no-store'});if(!response.ok)throw new Error('Итог дня недоступен');const v=await response.json();day.querySelector('[data-day-status]')?.remove();const box=el('div',undefined,day);box.dataset.dayStatus='';el('p',v.message,box);if(v.totals)el('p',`${Math.round(v.totals.kcal)} ккал; Б ${v.totals.protein}, Ж ${v.totals.fat}, У ${v.totals.carbs} г · ${v.meal_count} приёмов`,box);if(!v.complete&&v.meal_count)button('На сегодня всё',box,async()=>{const r=await fetch('/api/day-status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({day:v.day})});if(!r.ok)throw new Error('Проверьте выбранный день');box.textContent='День подтверждён. Новое или изменённое блюдо снова откроет дневник.';});});
       const recent=section('Выбрать из последних 6 приёмов',content);button('Показать недавние блюда',recent,async()=>{
@@ -240,7 +253,10 @@
         }
       });
     }
+    for(const [key,value] of draft)preferenceFields.get(key)?.write(value);
+    if(draft.some(([key])=>key==='sources'))updateParticipation(participationState,healthItems);
     if(focus)content.querySelector('[data-link-field="'+CSS.escape(focus)+'"]')?.focus();
+    return dirtyPreferences().length;
   }
   async function open(){
     if(!dialog?.open)opener=document.activeElement;
@@ -253,7 +269,7 @@
       el('style','#progressor-connections [data-source-readiness] span{display:block}#progressor-connections .link-source{margin-bottom:10px}#progressor-connections .link-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}#progressor-connections .link-heading h2{min-width:0;margin:0;overflow-wrap:anywhere}#progressor-connections .link-heading button{flex:none;min-width:44px}',document.head);
       // Host card colors can be translucent; the modal needs an opaque surface.
       el('style','#progressor-connections{background:#14213d;color:#f1f5f9}#progressor-connections button,#progressor-connections select{background:#243657;color:#f1f5f9;border-color:#64748b}#progressor-connections,#progressor-connections *{font-family:system-ui,-apple-system,"Segoe UI",sans-serif!important}#progressor-connections input:not([type=checkbox]){box-sizing:border-box;max-width:100%;min-height:44px;padding:8px;border:1px solid #64748b;border-radius:8px;background:#243657;color:#f1f5f9}',document.head);
-      dialog.addEventListener('close',()=>{disposeReadiness?.();disposeReadiness=undefined;viewGeneration++;openRequest++;opener?.focus();});
+      dialog.addEventListener('close',()=>{disposeReadiness?.();disposeReadiness=undefined;preferenceFields.clear();viewGeneration++;openRequest++;opener?.focus();});
       dialog.addEventListener('keydown',event=>{
         if(event.key!=='Tab')return;
         const controls=[...dialog.querySelectorAll('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary,[tabindex="0"]')].filter(n=>n.getClientRects().length&&!n.closest('[hidden]'));
@@ -264,7 +280,7 @@
       });
     }
     const generation=++viewGeneration,opening=++openRequest;
-    disposeReadiness?.();disposeReadiness=undefined;content.replaceChildren();todayReload=null;
+    disposeReadiness?.();disposeReadiness=undefined;preferenceFields.clear();content.replaceChildren();todayReload=null;
     document.dispatchEvent(new Event('progressor:overlay-open'));
     if(!dialog.open)dialog.showModal();notice.textContent='Загружаем ваши настройки…';
     try{await window.Progressor?.ready;if(generation!==viewGeneration||!dialog?.open)return;if(!await refresh())return;notice.textContent='';

@@ -109,3 +109,20 @@ listeners and old reservations. Keep view/request ownership, draft/focus and the
 eight-second settings acknowledgement contracts. Canonical whole-asset Node23
 includes the previous20 response guards plus3 layout/lifecycle cases. Browser
 geometry uses a project tolerance of1 CSSpx, not a human-usability threshold.
+
+
+## Partial preference acknowledgements and local drafts — sixth scope
+
+Canonical connections save(patch) owns only keys in that acknowledged patch.
+Keep server current.preferences authoritative and preserve unrelated dirty
+preference display values across its rerender. The per-render registry compares
+initial displayed values, with semantic array/object ordering and typed values;
+it does not add unrelated keys to the POST or save them automatically. Rest
+actions may acknowledge themselves while preserving other preference drafts.
+Only five preference groups are covered: connections/notifications, weekly,
+diet/exclusions, Food day prompt and rest. Coach/rhythm refresh callbacks and
+other transient native editors remain separate; never claim all UI writes are
+covered. Explicit409 refresh discards drafts as warned; close/open dispose the
+registry. Keep old request/view/acknowledgement/field-lock/geometry guards. Run
+whole-asset Node35 (previous23 plus12) and the source-bound native partial-write
+acceptance; no bot copies, storage, backend or extra provider calls are added.
