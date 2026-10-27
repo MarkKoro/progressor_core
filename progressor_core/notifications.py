@@ -25,8 +25,11 @@ def candidate(store,user_id,prefs,now=None,enabled_sources=None):
     def unseen(h): return not any(store.hint_was_seen(user_id,t,h['delivery_key']) for t in ('food','gym') if t in h['targets'])
     if prefs.get('workout_enabled'):
         workouts=(c.get('activity') or {}).get('workouts',[])
+        from .workout_notification_compat import legacy_programmed_workout, suppress_free_notifications
+        suppress_free=any(not legacy_programmed_workout(w) for w in workouts) and suppress_free_notifications(store)
         fresh=[]
         for w in workouts:
+            if suppress_free and not legacy_programmed_workout(w): continue
             if w.get('session_complete') is False: continue
             stamp=datetime.fromisoformat(w['completed_at'].replace('Z','+00:00'))
             if now-timedelta(hours=2)<=stamp<=now-timedelta(minutes=30) and stamp.timestamp()>max(prefs.get('enabled_at',now.timestamp()),policy.get('last_pause_started_at',0)) and not w.get('backfilled'):

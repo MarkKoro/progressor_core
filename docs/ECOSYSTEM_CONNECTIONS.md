@@ -112,3 +112,26 @@ eight-second acknowledgement, old response/reopen and loading geometry rules
 are unchanged. Food's day prompt appears only in Food. Coach/rhythm api()+refresh,
 timezone/atlas/native editors, persistent exit and navigation design are outside
 this bounded correction. No backend, legal, entitlement or rest policy changes.
+
+
+## Preparatory H08 notification fallback — 2026-10-26
+
+The Core-local guard in [FREE_WORKOUT_NOTIFICATIONS.md](FREE_WORKOUT_NOTIFICATIONS.md)
+prepares a compatible fallback before the later free-workout clock/proof release.
+It leaves history, source UTC, Today views, goals and native journals unchanged.
+It creates no policy table, adoption epoch, proof/admission row, AI call or new
+sender. Once either reserved SQLite object exists, fallback candidate calculation
+omits all free/unclassified workout triggers; unreadable metadata fails closed
+for that branch. Successful object-absent reads preserve legacy behavior. Exact
+ASCII positive numeric programmed workouts retain their existing path and guards.
+
+In a mixed list, the retained numeric rows alone can contribute an energy range;
+the old combined free/numeric text can change. A suppressed free post-workout
+candidate can also leave an existing nutrient candidate as the next priority;
+its rules and Food's delivery reservation/uncertain-result handling do not change.
+No free-workout clock correctness, owner-reset-floor writer, policy migration or
+physical delivery is claimed here. Future full H08 must gate both free admission and candidate selection on
+T>max(global adoption,current Core identity creation), preserving source UTC.
+Its ten owner-reset holdouts are planned, not executed. Proof/time/admission
+and reset writers remain a separate coordinated implementation; this shim does
+not certify the full UTC fix or those future writers.

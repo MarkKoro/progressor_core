@@ -126,3 +126,33 @@ covered. Explicit409 refresh discards drafts as warned; close/open dispose the
 registry. Keep old request/view/acknowledgement/field-lock/geometry guards. Run
 whole-asset Node35 (previous23 plus12) and the source-bound native partial-write
 acceptance; no bot copies, storage, backend or extra provider calls are added.
+
+
+## Preparatory free-workout notification fallback — seventh scope
+
+Read docs/FREE_WORKOUT_NOTIFICATIONS.md before the future H08 proof/admission
+writer or rollback work. This Core-only compatibility guard creates no table,
+epoch, admission, trigger, native proof, AI call or sender. Either reserved
+SQLite policy/admission object (ASCII NOCASE, any shape), or a SQLite inspection
+error, suppresses free/unclassified post-workout triggers. With no object and a
+successful read, legacy behavior remains. Only exact ASCII positive numeric
+workout identifiers keep the programmed compatibility path. Existing incomplete
+session, access, source, opt-in, rest, quiet and delivery guards remain.
+
+Full-H08 free admission and candidate reads must both require source clock T
+strictly after max(global adoption E,current Core identities.created_at I).
+Missing, invalid or future identity state fails closed; ordinary reads never
+create or advance I. This owner-reset floor and its ten planned holdouts are
+future design, not implemented/tested by this compatibility-only shim. No full
+UTC/calendar fix or writer/owner-erasure/rollback certification is provided here. Future full H08 must preserve the global epoch and terminal decisions and
+install its dedicated persistent owner-cleanup trigger. Do not drop reserved
+objects or restore live databases to recover old behavior. Install and verify
+this shim as the actual retained fallback before the later full release.
+
+Mixed free/numeric energy text uses only retained numeric rows; removing a free
+trigger can expose an existing lower-priority nutrient candidate. Do not claim
+all mixed messages are byte-identical. No shared/native mirror or UI change is
+part of this scope. Compose from fresh main after sixth closeout, record the
+release notes and run explicit Linux deploy/run_core_checks.py plus relevant
+release gates before ordinary main publication and the existing update-all
+rollout.

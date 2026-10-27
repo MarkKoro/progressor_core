@@ -311,3 +311,45 @@ and paid projections stay unchanged. No native source/dependency/helper, payment
 consumer, gate or H08-D change belongs here. Only the three documentation notes
 and canonical JS/CJS differ; final source/gates must precede publication, fresh
 four-DB off-server backup restores, existing update-all/strict and postbackup.
+
+
+## Seventh H08 compatibility-only preparation — 2026-10-26
+
+Local preparation uses the exact sixth publication source364/freeze5aab34f2,
+Core main c4ee51193421e05797442531dbc79c43889827e5 and unchanged three bot refs.
+Sixth installed transaction20261026T153235Z-1890433 passed strict verification
+SHA256 3af48df573feae1b32e11282ffd8f59c3f44b46c6f6372a3d97af44ca37ac3de.
+Sixth close is now complete, bound by receipt SHA256
+36aeb2be87ad2acc09a1730e3d711a45b6676648a8b36e6a8faec5213dba4eb3.
+Post-backup bundle SHA256
+0a7bca894beb08a7933793366271d7ab0a68f126944e74f468e7aed46ee2a25a
+passed all four off-server restores. Exactly two verified expanded copies were
+removed (544587640 bytes); archives/off-server copies remain. Root final15:59UTC
+GitHub4 observation matched installed c4ee/Core and the three unchanged bot heads.
+Fresh exact Git metadata binding is still required before the next release
+freeze; this local candidate has not itself been frozen, tested or published.
+
+The independently reviewed four-path shim (review10da74af) adds a read-only
+reserved-object presence guard and filters only nonnumeric/free notification
+triggers after adoption or inspection failure. The fallback deliberately
+suppresses even genuinely new free sessions until full H08 runs again. No schema,
+epoch, admission/writer, sourcebot, dependency, UI, AI, sender or delivery-key
+change is introduced. Numeric-only behavior and existing guards remain; mixed
+energy estimates narrow to retained numeric rows, and the pre-existing later
+nutrient priority can become selected. Full-H08 owner-reset design e55c7996 /
+addendum88f3d0b4 requires T>max(global epoch,current Core identity creation) in
+both future admission and candidate. Its ten holdouts remain planned and no
+writer, full UTC fix or owner-reset implementation/testing is claimed here.
+
+Accepted shim evidence is19 portable Windows unit methods and an independent
+8-method/75-observation controlled SQLite/old-new review, with overlap explicitly
+declared. A missing-tzdata base-Python failure is retained; the unchanged cases
+passed in the existing declared venv. No native/provider/delivery or full Linux
+claim follows from these pure checks. Proposed next acceptance is Core424 plus
+unchanged Food192/Gym244/Supply95,955 total, and the unchanged canonical Node35.
+These proposed release gates have not run for this composition. Shared JS/CJS
+and all three native products are byte-identical to sixth, so no repeat native
+UI37 is required by this backend-only scope; earlier evidence is not renamed as
+a newly executed run. A new source freeze, appropriate Linux/rollback checks,
+fresh bounded four-DB backup/off-server restore, normal FF main, existing
+update-all/strict verification and post-backup restore remain root release work.
