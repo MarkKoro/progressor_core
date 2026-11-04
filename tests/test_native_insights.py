@@ -100,14 +100,14 @@ class NativeContext(unittest.TestCase):
         self.detailed_gym();self.profile()
         original=next(e for e in self.store.data(str(USER))[0] if e['entity_id'].startswith('workout:'))
         stamp=(NOW-timedelta(days=150)).isoformat()
-        payload=deepcopy(original['payload']);payload.update(entity_id='workout:historical-quality',revision=1,completed_at=stamp,source_local_date=stamp[:10])
+        payload=deepcopy(original['payload']);payload.update(entity_id='workout:980002',revision=1,completed_at=stamp,source_local_date=stamp[:10])
         self.store.accept(dict(event_id='historical-quality',event_type='workout.completed',schema_version=1,source='gym',user_id=str(USER),occurred_at=stamp,correlation_id='test',payload=payload))
         current=self.store.context_snapshot(str(USER),workout_day=NOW.date().isoformat())[0][0]
-        old=next(e for e in current if e['entity_id']=='workout:historical-quality')
+        old=next(e for e in current if e['entity_id']=='workout:980002')
         self.assertNotIn('strength_metrics',old['payload'])
         self.assertEqual(old['payload']['completed_at'],stamp)
         historic=self.store.context_snapshot(str(USER),workout_day=stamp[:10])[0][0]
-        self.assertEqual(next(e for e in historic if e['entity_id']=='workout:historical-quality')['payload']['strength_metrics'],payload['strength_metrics'])
+        self.assertEqual(next(e for e in historic if e['entity_id']=='workout:980002')['payload']['strength_metrics'],payload['strength_metrics'])
         full=self.store.data(str(USER));counts={'supply_taken_count':1}
         expected=build_context(self.store,str(USER),NOW,requested_day=stamp[:10],target='food',_request_data=(full,counts))
         actual=build_context(self.store,str(USER),NOW,requested_day=stamp[:10],target='food')

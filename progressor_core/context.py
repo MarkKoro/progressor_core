@@ -7,6 +7,7 @@ from .native_insights import enrich_workouts, native_hints
 from .offers import bundle_preview
 from .profiles import resolve_profile
 from .connections import preferences
+from .workout_time import known_workout, TIME_COVERAGE
 
 
 def build_context(store, user_id, now=None, requested_day=None, target=None, enabled_sources=None, *, _request_data=None):
@@ -31,7 +32,7 @@ def build_context(store, user_id, now=None, requested_day=None, target=None, ena
     fresh_entities=[e for e in entities if source_status[e['source']]['status']=='ok']
     # Keep all history for comparison, but calculate estimates only for the day
     # being shown. Enriching every old session on each view grew quadratically.
-    today_ids={e['entity_id'] for e in fresh_entities if e['source']=='gym' and e['entity_id'].startswith('workout:')
+    today_ids={e['entity_id'] for e in fresh_entities if known_workout(e,now=now)
                and datetime.fromisoformat(e['payload']['completed_at'].replace('Z','+00:00')).astimezone(food_zone).date()==day}
     workouts=enrich_workouts(fresh_entities,now,selected_ids=today_ids)
     activity_reason = 'missing_gym_membership' if 'gym' not in active else 'stale_gym_source' if source_status['gym']['status'] != 'ok' else 'workout_recorded' if workouts else 'no_completed_workout_recorded'
@@ -90,6 +91,7 @@ def build_context(store, user_id, now=None, requested_day=None, target=None, ena
     if activity and any(w['payload'].get('energy_estimate') for w in workouts):
         activity['uncertainty']='Расход энергии приблизительный. Цель питания автоматически не изменяется: обычная активность уже может быть учтена.'
     if data.get('activity') is not None:
+        data['activity']['time_coverage']=TIME_COVERAGE
         data['activity']['recorded_session_count']=len(workouts)
         data['activity']['completed_workout_count']=sum(w['payload'].get('session_complete',True) for w in workouts)
     from .journey import workout_follow_up

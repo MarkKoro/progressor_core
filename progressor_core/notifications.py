@@ -1,4 +1,5 @@
 """Read-only candidate calculation. The existing Food bot owns opt-in and delivery."""
+import sqlite3
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from .context import build_context
@@ -25,11 +26,21 @@ def candidate(store,user_id,prefs,now=None,enabled_sources=None):
     def unseen(h): return not any(store.hint_was_seen(user_id,t,h['delivery_key']) for t in ('food','gym') if t in h['targets'])
     if prefs.get('workout_enabled'):
         workouts=(c.get('activity') or {}).get('workouts',[])
-        from .workout_notification_compat import legacy_programmed_workout, suppress_free_notifications
-        suppress_free=any(not legacy_programmed_workout(w) for w in workouts) and suppress_free_notifications(store)
+        from .workout_notification_compat import legacy_programmed_workout
+        from .free_workout_notifications import allowed
+        from .workout_time import free_activity_instant
+        admitted=set()
+        if any(not legacy_programmed_workout(w) for w in workouts):
+            try:
+                with store.connection() as db:
+                    for w in workouts:
+                        if not legacy_programmed_workout(w) and free_activity_instant(w) is not None and allowed(db,user_id,w.get('entity_id'),w,now=now.timestamp()):
+                            admitted.add(w['entity_id'])
+            except sqlite3.Error:
+                admitted.clear()
         fresh=[]
         for w in workouts:
-            if suppress_free and not legacy_programmed_workout(w): continue
+            if not legacy_programmed_workout(w) and w.get('entity_id') not in admitted: continue
             if w.get('session_complete') is False: continue
             stamp=datetime.fromisoformat(w['completed_at'].replace('Z','+00:00'))
             if now-timedelta(hours=2)<=stamp<=now-timedelta(minutes=30) and stamp.timestamp()>max(prefs.get('enabled_at',now.timestamp()),policy.get('last_pause_started_at',0)) and not w.get('backfilled'):

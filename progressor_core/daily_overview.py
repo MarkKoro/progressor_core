@@ -5,6 +5,7 @@ from .access import entitlements
 from .adapters import zone
 from .connections import preferences
 from .contracts import SOURCES, subject
+from .workout_time import known_workout, TIME_COVERAGE
 
 NAMES = {'gym': 'Gym Diary', 'food': 'Food', 'supply': 'Supply'}
 STATUS = {
@@ -73,7 +74,7 @@ def daily_overview(store, user_id, now=None, *, target=None):
     health = connection_health(store, uid, now, target=target, snapshot=snapshot, policy=policy)
     ready = {r['source'] for r in health['items'] if r['status'] == 'ready'}
     sections = []
-    workouts = [e['payload'] for e in entities if e['source']=='gym' and e['entity_id'].startswith('workout:')] if 'gym' in ready else []
+    workouts = [e['payload'] for e in entities if known_workout(e,now=now)] if 'gym' in ready else []
     current = next((e['payload'] for e in entities if e['source']=='food' and e['entity_id'].startswith('daily:')), None) if 'food' in ready else None
     food = {'totals':current['totals'] if current else None,'logged_meal_count':current['logged_meal_count'] if current else 0,
             'day_complete':bool(current and current.get('day_complete')),'latest_meal_at':current.get('latest_meal_at') if current else None}
@@ -83,10 +84,10 @@ def daily_overview(store, user_id, now=None, *, target=None):
         working = sum((w.get('strength_metrics') or {}).get('working_sets', w.get('strength_sets', 0))
                       for w in workouts)
         text = (f'Завершено занятий — {completed}; незавершённых записей — {total - completed}. '
-                f'Рабочих подходов — {working}.') if total else 'За этот день тренировочных записей пока нет.'
+                f'Рабочих подходов — {working}.') if total else 'За этот день нет тренировок с известным временем.'
         sections.append({'source': 'gym', 'name': NAMES['gym'], 'day': day, 'timezone': 'Europe/Moscow',
                          'text': text, 'recorded_sessions': total, 'completed_sessions': completed,
-                         'working_sets': working})
+                         'working_sets': working, 'time_coverage': TIME_COVERAGE})
     if 'food' in ready:
         totals = food['totals']
         if totals is None:
@@ -120,4 +121,4 @@ def daily_overview(store, user_id, now=None, *, target=None):
     return {'schema_version': 1, 'title': 'Сегодня вместе', 'generated_at': now.isoformat(), 'day': day,
             'day_timezone': 'Europe/Moscow', 'day_label': 'Тренировки и питание — день журнала Food, Москва (UTC+3). Приёмы Supply — по его часовому поясу.',
             'sections': sections, 'health': health, 'relationship': relationship,
-            'workout_follow_up': follow_up, 'coverage': 'Только ваши сохранённые записи. Это сводка, а не оценка здоровья или назначение.'}
+            'workout_follow_up': follow_up, 'coverage': 'Только ваши сохранённые записи. Это сводка, а не оценка здоровья или назначение.'+(' '+TIME_COVERAGE if 'gym' in ready else '')}

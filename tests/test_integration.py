@@ -224,7 +224,7 @@ class Integration(unittest.TestCase):
                 self.engine.store.reconcile(source,snapshot(source,self.paths[source]))
 
     def test_timezone_day_boundary(self):
-        event = self.event(); event['occurred_at'] = event['payload']['completed_at'] = '2026-10-06T21:30:00Z'
+        event = self.event(); event['payload']['entity_id'] = 'workout:983001'; event['occurred_at'] = event['payload']['completed_at'] = '2026-10-06T21:30:00Z'
         self.engine.store.accept(event)
         data = self.context()
         self.assertEqual(data['activity']['date'],'2026-10-07')

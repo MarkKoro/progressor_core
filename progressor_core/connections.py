@@ -273,12 +273,13 @@ FAQ = [
 
 def weekly_overview(store,user_id,now=None):
     from .context import build_context
+    from .workout_time import known_workout, TIME_COVERAGE
     now=now or datetime.now(timezone.utc)
     data=build_context(store,subject(user_id),now=now)
     nutrition=data.get('nutrition') or {};activity=data.get('activity') or {}
     entities,_,_=permitted_entities(store,user_id,now)
     start=now-timedelta(days=7)
-    workouts=[e for e in entities if e['source']=='gym' and e['entity_id'].startswith('workout:')
+    workouts=[e for e in entities if known_workout(e,now=now)
               and start<=datetime.fromisoformat(e['payload']['completed_at'].replace('Z','+00:00'))<=now]
     # Context retains a degraded Supply shell to explain source health. It is
     # not permission to turn an old ledger into a current weekly aggregate.
@@ -292,6 +293,6 @@ def weekly_overview(store,user_id,now=None):
             intake_count=db.execute("SELECT count(*) FROM entities WHERE user_id=? AND source='supply' AND deleted=0 AND entity_id GLOB 'intake:*' AND json_extract(payload,'$.status')='taken' AND json_extract(payload,'$.source_local_date')>=?",(subject(user_id),start.date().isoformat())).fetchone()[0]
     return {'nutrition':(nutrition.get('history') or {}).get('7'),'workouts':{'recorded_sessions':len(workouts),
         'completed_sessions':sum(e['payload'].get('session_complete',True) for e in workouts),
-        'working_sets':sum(e['payload'].get('strength_sets',0) for e in workouts)} if 'gym' in data['memberships'] else None,
+        'working_sets':sum(e['payload'].get('strength_sets',0) for e in workouts),'time_coverage':TIME_COVERAGE} if 'gym' in data['memberships'] else None,
         'supply':{'active_supplements':supply['active_supplement_count'],'recorded_intakes':intake_count} if supply else None,
-        'sources':data['sources'],'coverage':'Только сохранённые записи. Отсутствие отметки не означает отсутствие еды, тренировки или приёма.'}
+        'sources':data['sources'],'coverage':'Только сохранённые записи. Отсутствие отметки не означает отсутствие еды, тренировки или приёма.'+(' '+TIME_COVERAGE if 'gym' in data['memberships'] else '')}

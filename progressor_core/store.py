@@ -43,6 +43,12 @@ class Store:
             db.executescript(NEXT_MEAL_SCHEMA)
             if db.execute('SELECT max(version) FROM schema_version').fetchone()[0] != 1:
                 raise RuntimeError('unsupported_core_schema')
+            # This normal startup path owns policy adoption; ordinary readers
+            # never call its migration. A malformed retained policy disables
+            # only free admission and is not repaired or reinitialized.
+            from .free_workout_notifications import initialize
+            db.execute('BEGIN IMMEDIATE')
+            initialize(db)
 
     @contextmanager
     def connection(self):
@@ -104,6 +110,11 @@ class Store:
                     raise ValueError('membership_subject_changed')
                 db.execute('INSERT OR IGNORE INTO identities VALUES(?,?)', (member['user_id'], now_utc()))
                 db.execute('INSERT INTO memberships VALUES(?,?,?,1) ON CONFLICT(source,local_id) DO UPDATE SET active=1', (source, member['local_id'], member['user_id']))
+            if source == 'gym':
+                from .free_workout_notifications import observe_snapshot
+                # Record first observations before the content-hash skip, in
+                # the same successful owner snapshot transaction as events.
+                observe_snapshot(db, snapshot, previous)
             changed = 0
             for entity_id in sorted(set(current) | set(previous)):
                 item, prior = current.get(entity_id), previous.get(entity_id)
@@ -231,6 +242,14 @@ class Store:
             memberships=[dict(row) for row in db.execute('SELECT source,local_id,active FROM memberships WHERE user_id=?',(user_id,))]
             state={row['source']:dict(row) for row in db.execute('SELECT * FROM source_state')}
             taken=db.execute("SELECT count(*) FROM entities WHERE user_id=? AND source='supply' AND deleted=0 AND entity_id GLOB 'intake:*' AND json_extract(payload,'$.status')='taken'",(user_id,)).fetchone()[0]
+        # This request projection is not the saved workout journal. Unknown
+        # free clocks cannot place detailed vectors into its timed context;
+        # keep metadata for coverage, and preserve full data()/events unchanged.
+        # Known workouts retain the existing SQL91-day/+2-day vector window.
+        from .workout_time import known_workout
+        for entity in entities:
+            if entity['source']=='gym' and entity['entity_id'].startswith('workout:') and not known_workout(entity):
+                entity['payload'].pop('strength_metrics',None)
         return (entities,memberships,state),{'supply_taken_count':taken}
 
     def daily_snapshot(self, user_id, day):

@@ -135,3 +135,28 @@ T>max(global adoption,current Core identity creation), preserving source UTC.
 Its ten owner-reset holdouts are planned, not executed. Proof/time/admission
 and reset writers remain a separate coordinated implementation; this shim does
 not certify the full UTC fix or those future writers.
+
+
+## Free workouts across timezone changes — coordinated H08
+
+Gym records a source UTC clock, native session date and validated source zone
+in its own transaction. Finishing explicitly or after90 minutes preserves that
+clock; inactivity is never exercise duration. A later profile timezone change
+must not turn this action into synthetic local midnight or move its source day.
+Both exercise entry surfaces remain native and autonomous during Core outages.
+
+Core validates the optional native_touch witness and uses its UTC instant in
+Today/week, insights, rhythm, journey follow-ups and bounded AI context. A saved
+legacy timestamp or timezone history without a matching action witness remains
+recorded_only: native/raw history is retained, but uncertain timing cannot
+authorize a timed count, load comparison or post-workout reminder. The rendered
+day/week coverage text explains this limit only when Gym is currently permitted
+and ready. No AI request is made to infer missing time or energy.
+
+New free reminders additionally require durable first-observation admission and
+activity strictly after both Core's global adoption and the current owner's
+Core identity creation. Deleting Core-owned identity data cannot replay old Gym
+history. Existing access, source freshness, preferences, rest, quiet hours,
+30-minute–2-hour timing, seen/day state and Food reservations still apply. The
+Food Moscow journal day, goals, meal anchors and native sender are unchanged.
+See [the full protocol and fallback boundary](FREE_WORKOUT_NOTIFICATIONS.md).

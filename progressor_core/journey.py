@@ -1,11 +1,12 @@
 """Factual completion of a cross-product journey, without inferring food needs."""
 from datetime import datetime
+from .workout_time import known_payload
 
 
 def workout_follow_up(data, now):
     activity = data.get('activity') or {}
-    records = activity.get('workouts') or []
-    completed = [w for w in records if w.get('session_complete', True)]
+    records = [w for w in activity.get('workouts') or [] if known_payload(w,now=now)]
+    completed = [w for w in records if known_payload(w,completed=True,now=now)]
     if not completed:
         return 'training_in_progress' if records else 'no_completed_workout'
     if data.get('sources', {}).get('food', {}).get('status') != 'ok':

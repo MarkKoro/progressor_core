@@ -84,6 +84,8 @@ def gym(db):
                     profile_kind='coach_link',link_id=str(link['id']),coach_id=subject(coach['tg_id']),
                     coach_enabled=bool(link['is_trainer']),status=link['status'],label='Тренер Gym Diary'))
     seen_sessions=set(); represented_sessions=set()
+    from .workout_time import GymFreeTime, canonical_clock
+    free_times = GymFreeTime(db, users)
     sets_columns={r['name'] for r in db.execute('PRAGMA table_info(sets)')}
     detailed_sets={'reps','seconds','weight_kg','user_exercise_id'}.issubset(sets_columns)
     has_details=bool(db.execute("SELECT 1 FROM sqlite_master WHERE name='workout_session_details'").fetchone())
@@ -134,9 +136,7 @@ def gym(db):
             seconds=sum(number(r['duration_sec'] if r['duration_sec'] else number(r['duration_ms'])/1000) for r in runs)
             if not metrics['working_sets'] and not seconds: continue
             seen_sessions.add(logical_key)
-            recorded=max((instant(r['done_at']) for r in done if r['done_at']),default=local_day_instant(session['date'],tz))
-            same_day=datetime.fromisoformat(recorded.replace('Z','+00:00')).astimezone(zone(tz)).date().isoformat()==session['date']
-            completed=recorded if same_day else local_day_instant(session['date'],tz)
+            recorded=max((instant(r['done_at']) for r in done if r['done_at']),default=None)
             kind='mixed' if metrics['working_sets'] and seconds else 'strength' if metrics['working_sets'] else 'cardio'
             duration=None
             if db.execute("SELECT 1 FROM sqlite_master WHERE name='progressor_session_durations'").fetchone():
@@ -146,19 +146,17 @@ def gym(db):
             if db.execute("SELECT 1 FROM sqlite_master WHERE name='progressor_free_sessions'").fetchone():
                 free=db.execute('SELECT * FROM progressor_free_sessions WHERE session_id=?',(session['id'],)).fetchone()
             finished=bool(free and free['status']=='finished')
-            if finished and free['completed_at']:
-                recorded=instant(free['completed_at']);completed=recorded
-                same_day=datetime.fromisoformat(recorded.replace('Z','+00:00')).astimezone(zone(tz)).date().isoformat()==session['date']
-                if not same_day:completed=local_day_instant(session['date'],tz)
-            entities.append(entity('workout:session:'+str(session['id']),user['tg_id'],'workout.updated',recorded,
-                completed_at=completed,recorded_at=recorded,source_local_date=session['date'],timezone=tz,
+            timing=free_times.resolve(session,free,recorded,local_day_instant(session['date'],tz))
+            entities.append(entity('workout:session:'+str(session['id']),user['tg_id'],'workout.updated',timing['recorded_at'] or timing['completed_at'],
+                source_local_date=session['date'],**timing,
                 workout_type=kind,duration_seconds=duration if kind=='strength' else seconds if kind=='cardio' else None,
                 recorded_strength_duration_seconds=duration,recorded_cardio_seconds=seconds or None,
                 strength_duration_scope='explicit_strength_part' if duration else None,
                 energy_kcal_range=None,strength_sets=metrics['working_sets'],strength_metrics=metrics,
                 program_id=session['system_id'],day_index=session['day_index'],session_id=session['id'],
-                completion_basis=free['completion_basis'] if finished else 'explicit_exercise_marks',session_complete=finished,backfilled=not same_day,
-                estimate_quality='duration_not_recorded',timestamp_basis='source_utc' if same_day else 'session_local_day'))
+                completion_basis=free['completion_basis'] if finished else 'explicit_exercise_marks',session_complete=finished,
+                completion_recorded_at=canonical_clock(free['last_finished_at']) if finished else None,
+                estimate_quality='duration_not_recorded'))
     for row in db.execute("SELECT m.* FROM user_measurements m JOIN users u ON u.id=m.user_id WHERE m.metric='body_weight'"):
         user = users[row['user_id']]
         entities.append(entity('weight:' + str(row['id']), user['tg_id'], 'bodyweight.updated', instant(row['created_at']), value=number(row['value']), unit='kg', measured_at=instant(row['created_at'])))

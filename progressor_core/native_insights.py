@@ -4,6 +4,7 @@ from shared.workout_metrics import compare_load, energy_estimate
 from .profiles import resolve_profile
 from .journey import workout_follow_up
 from shared.food_sources import examples, macro_examples
+from .workout_time import known_workout, known_payload
 
 
 def parsed(value):
@@ -11,12 +12,13 @@ def parsed(value):
 
 
 def enrich_workouts(entities, now, *, selected_ids=None):
-    workouts=[e for e in entities if e['source']=='gym' and e['entity_id'].startswith('workout:')]
+    workouts=[e for e in entities if known_workout(e,now=now)]
     selected=workouts if selected_ids is None else [e for e in workouts if e['entity_id'] in selected_ids]
     # Birth year gives an age interval; reject boundary cases rather than guessing.
     for item in selected:
         p=item['payload']; completed=parsed(p['completed_at'])
         candidates=[e for e in workouts if e['entity_id']!=item['entity_id']
+                    and known_workout(e,completed=True,now=now)
                     and completed-timedelta(days=90)<=parsed(e['payload']['completed_at'])<completed
                     and e['payload'].get('program_id')==p.get('program_id') and e['payload'].get('day_index')==p.get('day_index')]
         candidates.sort(key=lambda e:e['payload']['completed_at'],reverse=True)
@@ -45,7 +47,7 @@ def native_hints(data, entities, now, day, *, food_preferences=None):
     source=lambda name:data['sources'].get(name,{}).get('status')=='ok'
     base={'rule_version':1,'delivery':'inline_only','dismiss_days':7}
     recorded_today=activity.get('workouts',[]) if activity and source('gym') else []
-    today=[w for w in recorded_today if w.get('session_complete',True)]
+    today=[w for w in recorded_today if known_payload(w,completed=True,now=now)]
     follow_up=workout_follow_up(data,now)
     if today and follow_up not in ('food_day_confirmed','food_recorded_after_workout'):
         working_sets=sum((w.get('strength_metrics') or {}).get('working_sets',w.get('strength_sets',0)) for w in recorded_today)
@@ -77,7 +79,7 @@ def native_hints(data, entities, now, day, *, food_preferences=None):
                       'details':'Проверьте, все ли блюда внесены. Обычная активность уже может входить в вашу цель питания. Оценка зависит от длительности, веса, темпа и пауз; это диапазон модели, не измерение. Без записанной длительности/подходящего профиля калории не вычисляются. Средние по питанию учитывают записанные дни за последнюю завершённую неделю. Цель Food автоматически не меняется.'})
     protein=seven.get('averages_on_logged_days',{}).get('protein'); goal=targets.get('protein')
     low_protein=source('food') and seven.get('logged_days',0)>=3 and goal and protein is not None and protein<goal*.8
-    training=[e for e in entities if e['source']=='gym' and e['entity_id'].startswith('workout:')
+    training=[e for e in entities if known_workout(e,completed=True,now=now)
               and now-timedelta(days=14)<=parsed(e['payload']['completed_at'])<=now] if source('gym') else []
     if low_protein:
         message=f"За последнюю неделю записано дней — {seven['logged_days']}. Белок в среднем по этим дням — {protein:g} г/день при вашей цели {goal:g} г."

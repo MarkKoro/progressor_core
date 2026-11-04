@@ -73,6 +73,9 @@ def validate_payload(kind,payload):
         from .adapters import zone
         zone(payload['timezone'])
     if kind.startswith('workout.'):
+        if any(k in payload for k in ('activity_clock','activity_time_basis','activity_day_basis')):
+            from .workout_time import validate_activity_metadata
+            validate_activity_metadata(payload)
         utc(payload.get('completed_at'))
         if payload.get('workout_type') not in ('strength','cardio','mixed','unspecified'): raise ValueError('invalid_workout_type')
         nonnegative(payload.get('duration_seconds'),nullable=True)

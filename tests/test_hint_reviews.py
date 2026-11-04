@@ -180,7 +180,7 @@ class HintReviews(unittest.TestCase):
 
     def test_non_reviewable_real_native_hint_cannot_be_confirmed(self):
         stamp = datetime.now(timezone.utc)
-        self.event('gym', 'workout:real-current', 'workout.completed',
+        self.event('gym', 'workout:980001', 'workout.completed',
                    {'completed_at': stamp.isoformat(), 'source_local_date': stamp.date().isoformat(),
                     'timezone': 'UTC', 'workout_type': 'strength', 'duration_seconds': None,
                     'strength_sets': 3, 'session_complete': True}, stamp)

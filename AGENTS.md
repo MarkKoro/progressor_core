@@ -156,3 +156,34 @@ part of this scope. Compose from fresh main after sixth closeout, record the
 release notes and run explicit Linux deploy/run_core_checks.py plus relevant
 release gates before ordinary main publication and the existing update-all
 rollout.
+
+
+## Coordinated free-workout time and anti-replay admission — H08, 2026-10-28
+
+The preparatory seventh section above describes the retained fallback. The full
+implementation now lives in workout_time.py/free_workout_notifications.py and
+the coordinated Gym native witness. Read docs/FREE_WORKOUT_NOTIFICATIONS.md's
+full-H08 section before changing any workout reader, reconcile, identity erase,
+AI selector or rollout. Keep the old shim module unchanged for the verified
+fallback; do not duplicate Core in a bot or introduce a new manual gate.
+
+Only a matching native_touch witness proves free activity time. A timezone
+ledger alone proves a calendar interval, never an action. Unknown/legacy clocks
+remain in native/raw history but are excluded from timed counts, insights,
+rhythm and AI; context_snapshot omits their exercise vectors without erasing
+events. Keep both AI selectors on the same completed/nonfuture14-day/max20 list.
+Known programmed workout:<positive ASCII decimal> remains a named legacy path.
+
+Startup alone adopts global E when both policy objects are absent. Never repair
+partial/malformed adoption by dropping objects or resetting E. Successful Gym
+reconciliation alone observes terminal admitted/denied/revoked receipts before
+hash skips; failed sources/rest/expiry are not deletion. Candidate reads are
+read-only and independently require T>max(E,current identity I,unknown floor).
+Preserve the dedicated owner-delete trigger during fallback and the bounded
+128-key composite-PK probes/latest-marker index. Identity reads do not create I.
+
+Use the existing update-all engine and verify actual retained77d75b8d/shim80e78ba5
+before switching. Preserve policy, source proof, additive triggers and later
+user/paid writes on rollback. There is no new generic H08 downgrade fence in
+the updater: arbitrary pre-shim/manual forced downgrade is unsupported. Keep
+the financial2/owner1/next-meal1 gates and Food delivery reservations unchanged.

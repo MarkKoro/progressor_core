@@ -147,3 +147,140 @@ exact numeric and malformed identifiers, before/after candidate equivalence,
 other notification priorities, mixed/partial lists, and inspection failure.
 These are controlled unit scenarios, not a completed full H08 native/device or
 production rollout. Provider and Telegram delivery are not exercised.
+
+
+## Full H08 implementation — coordinated Gym/Core source, 28 October 2026
+
+The sections above preserve the historical seventh compatibility contract and
+its planned checks. This section describes the implemented full version; it
+does not claim that the full version is already installed. The canonical Core
+modules are workout_time.py, free_workout_notifications.py and Store's declared
+startup/reconciliation hooks. Gym owns progressor_free_workout.py and the native
+source witness; no second Core application or shared UI copy is introduced.
+
+### Source time and read projections
+
+Gym retains the six ordered progressor_free_sessions columns. Its separate
+progressor_free_activity_proof row binds exact session id, last_activity scalar,
+source date, validated IANA/exact UTC±HH:MM zone, version1 and native_touch.
+Touch writes state then proof in the same native transaction. UPDATE OF
+last_activity invalidates the old proof even when equal; insert/delete/session
+delete and explicit owner cleanup prevent stale proof with foreign keys off.
+Finish never writes or backfills proof and never assigns last_activity in its
+conflict clause. Existing explicit/5400-second completion, operation receipts,
+sets/repetitions and independent native access remain unchanged.
+
+Core checks the whole clock/day/session/zone pairing. Genuine source UTC and
+source local date survive profile travel. A transition ledger can describe a
+continuous owner calendar interval after its first transition; it cannot prove
+an action. Missing/malformed/legacy/no-state completion remains recorded_only
+or not_recorded, without pretending current timezone or local midnight is the
+activity time. Raw events/native history remain available; timed summaries,
+comparisons and AI omit unknown time. context_snapshot also omits uncertain
+exercise vectors after decode; raw data()/events retain them. The existing
+known-time SQL91-day/+2-day margin is preserved.
+
+Both AI selectors use the same known, completed, nonfuture14-day window capped
+at20 summaries. Compact context retains time/day provenance and uncertainty;
+it sends no detailed exercise vectors and makes no additional AI call. Day/week
+coverage appears through existing rendered coverage text only for permitted,
+ready Gym. Programmed exact ASCII workout:[1-9][0-9]* keeps its existing time
+semantics; correcting historic programmed timezone matching is outside H08.
+
+### Adoption, admission and owner incarnation
+
+Store startup initializes the two reserved tables, global singleton protocol1 E,
+dedicated identity-delete trigger and partial latest-unknown-marker index in its
+normal transaction/savepoint only when both tables are absent. Existing valid E
+is reused; malformed/partial objects fail closed for free notifications while
+other Core operations remain available. Ordinary reads never initialize policy.
+E is not a preference, entitlement, source time or new manual readiness gate.
+
+Successful complete Gym reconciliation observes free clocks before the same-hash
+skip and creates an owner's current identity before observing that owner.
+Only first-observed native_touch T strictly after max(E,current identity I) and
+not in the future may be admitted. Earlier/missing/invalid observations are
+terminally denied. An admitted clock later observed invalid or successfully
+deleted is terminally revoked. Same-clock metadata repair cannot reopen it;
+new genuine activity must also pass the latest unknown/deletion floor. Source
+read failure, source/access off, rest and expiry are not successful deletion.
+
+Candidate selection independently validates policy, current canonical I, source
+proof, terminal receipt and T>max(E,I,unknown floor), without writes. Missing,
+future or malformed identity/policy state suppresses free candidates. Only
+SQLite read errors are contained at the new metadata-connection boundary;
+unrelated programming errors are not swallowed. Numeric and existing later
+nutrient priorities can continue when free metadata cannot be read.
+
+Identity erasure removes only that owner's admissions/unknown markers via the
+dedicated persistent trigger and retains E. Re-import creates a fresh I before
+hash-equal skipping, so old Gym activity and retained Food opt-in cannot replay.
+Normal polls/restarts/settings do not advance I. Native Food clear-data remains
+its separate opt-out/reset path. Other owners, paid records and native DBs are
+not rewritten. Any future destructive reset retaining I must declare its own
+atomic notification fence; do not infer one from ordinary settings changes.
+
+Unchanged clocks use at most128-key composite-PK receipt probes per batch.
+Latest unknown/deletion state uses its partial index; repeated successful
+tombstones are idempotent. Do not replace this with unbounded admission scans
+or one identity query/write per unchanged row.
+
+### Delivery and recovery boundary
+
+All earlier source/target access, freshness, consent, completion, preferences,
+rest, quiet,30-minute–2-hour window, seen/dismissal and Food day-completion guards
+remain additional requirements. Food owns reserved/sent/uncertain delivery and
+confirmed RetryAfter state. H08 changes neither sender/reservation keys nor
+Moscow Food days, goals, nutrients, targets, doses or provider calls.
+
+The actual retained Core fallback is77d75b8d07fa1f125af973f3654c9a0203d189dd,
+whose workout_notification_compat.py SHA256 is
+80e78ba55d85f54e1ac004c82c4d2d2e7d418e71e45c763c54af9ecf624f3408.
+It suppresses all free/unclassified candidates once either policy object exists,
+including new valid activity, and does not provide the full UTC projection fix.
+The dedicated cleanup trigger and native invalidation triggers survive code
+rollback, so full→this shim→full preserves E, terminal decisions and owner-reset
+boundaries. The coordinated release verifies that actual fallback before switch
+and in strict checks. Never restore live DBs, drop objects or reset E to recover.
+
+The existing unchanged update-all is the sole deployment engine. It has no new
+generic H08 downgrade protocol/fence; arbitrary pre-shim/manual/forced main
+replacement is unsupported and prohibited. Existing financial2/owner1/meal1
+gates remain independent and cannot be described as an H08 downgrade fence.
+After rollback with valid retained policy, retry must pin/reuse the same E rather
+than treating the DB as a fresh absent-policy installation.
+
+### Evidence and release gate
+
+Focused synthetic suites cover22 native witness methods,25 reader methods and27
+Core admission methods. Separate composed scenarios exercise actual native→Core
+paths, owner reset, real Food delivery-state guards and whole retained fallback
+subprocesses; overlapping scenarios are not additional unique unit counts.
+Six older fixture files align their intended programmed/free positive controls
+and current unknown-time negatives with these contracts; product guards remain.
+
+The durable release journal binds exact source and evidence. Full canonical
+Linux discovery for all four products, fresh whole-asset Node35, independent
+review, a fresh bounded four-DB off-server restored pre-backup, ordinary main
+fast-forwards, existing update-all, read-only live/schema/fallback verification
+and a restored post-backup remain coordinated release requirements. Historical
+settings UI evidence applies only to unchanged canonical assets; changed Gym
+runtime is not an unchanged native tree or a new37-case device test. No real
+Telegram delivery, paid provider, physical-device or human UX claim is made.
+
+
+## Quoted schema literals — prepublication correction, 31 October 2026
+
+Schema comparison preserves the exact case, inner whitespace and doubled quote
+escapes of SQL string literals and quoted identifiers. Only whitespace outside
+quotes is normalized; do not casefold whole DDL. In particular, changing the
+admissions CHECK from 'admitted' to 'ADMITTED' changes its permitted values and
+must fail closed rather than appear to be the canonical schema.
+
+The regression demonstrates that old false positive using real SQLite DDL, then
+checks fresh/valid retained adoption, malformed retained startup/read/observation
+without ledger writes or epoch reset, and continued ordinary Core journal
+reconciliation. It adds one method to the previous27 admission tests,28 total.
+The matching operational inspector also preserves quoted bytes. Neither path
+repairs, drops or replaces a malformed policy. Full release gates and actual
+source-bound compound scenarios remain required for this corrected candidate.

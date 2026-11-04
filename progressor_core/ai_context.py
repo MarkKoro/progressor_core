@@ -2,6 +2,7 @@
 from datetime import datetime, timezone, timedelta
 from .context import build_context
 from .native_insights import enrich_workouts
+from .workout_time import completed_window, TIME_COVERAGE
 
 PROMPT_VERSION = 'progressor.cross_context.v2'
 PROMPT = '''Общий контекст Progressor — дополнительные данные пользователя из оплаченных разделов.
@@ -26,9 +27,7 @@ def build_ai_context(store, user_id, target, now=None):
     entities = request_data[0][0]
     fresh = {s for s, state in context['sources'].items() if state['status'] == 'ok' and s != target}
     fresh_entities=[e for e in entities if context['sources'].get(e['source'],{}).get('status')=='ok']
-    recent_workouts=sorted([e for e in fresh_entities if e['source']=='gym' and e['entity_id'].startswith('workout:')
-        and now-timedelta(days=14)<=datetime.fromisoformat(e['payload']['completed_at'].replace('Z','+00:00'))<=now],
-        key=lambda e:e['payload']['completed_at'])[-20:]
+    recent_workouts=completed_window(fresh_entities,now)
     enrich_workouts(fresh_entities,now,selected_ids={e['entity_id'] for e in recent_workouts})
     from .connections import preferences
     result = {'schema_version':1, 'prompt_version':PROMPT_VERSION,
@@ -52,7 +51,7 @@ def build_ai_context(store, user_id, target, now=None):
             data = {'personal_targets':context['nutrition']['targets'],'history_7_days':seven,'reported_profile':profile,
                 'profile_provenance':{k:v for k,v in context['profile']['provenance'].items() if v['source']=='food'},'profile_conflicts':context['profile']['conflicts']}
         elif source == 'gym' and context['activity']:
-            workouts = [e['payload'] for e in values if e['entity_id'].startswith('workout:') and datetime.fromisoformat(e['payload']['completed_at'].replace('Z','+00:00')) >= now-timedelta(days=14)]
+            workouts = [e['payload'] for e in recent_workouts]
             measurements = [e for e in values if e['entity_id'].startswith('weight:')]
             measurements.sort(key=lambda e:e['payload'].get('measured_at',''),reverse=True)
             # Per-exercise vectors are needed for deterministic comparisons, not for
@@ -60,12 +59,12 @@ def build_ai_context(store, user_id, target, now=None):
             workouts.sort(key=lambda w:w['completed_at'])
             compact=[]
             for workout in workouts[-20:]:
-                summary={k:workout.get(k) for k in ('completed_at','source_local_date','workout_type','duration_seconds','strength_sets','load_comparison','energy_estimate','session_complete','completion_basis')}
+                summary={k:workout.get(k) for k in ('completed_at','source_local_date','workout_type','duration_seconds','strength_sets','load_comparison','energy_estimate','session_complete','completion_basis','activity_time_basis','activity_day_basis','timezone')}
                 metrics=workout.get('strength_metrics') or {}
                 summary['strength_metrics']={k:metrics.get(k) for k in ('working_sets','repetitions','external_volume_kg')}
                 summary['strength_metrics']['hold_seconds']=sum(e.get('hold_seconds',0) for e in metrics.get('exercises',{}).values())
                 compact.append(summary)
-            data = {'completed_workouts_14_days':compact, 'recent_body_measurements':[e['payload'] for e in measurements[:3]], 'uncertainty':context['activity']['uncertainty']}
+            data = {'completed_workouts_14_days':compact, 'recent_body_measurements':[e['payload'] for e in measurements[:3]], 'uncertainty':context['activity']['uncertainty'], 'time_coverage':TIME_COVERAGE}
             if not workouts and not measurements: continue
         else: continue
         result['data'][source] = data

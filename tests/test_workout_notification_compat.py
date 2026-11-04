@@ -151,11 +151,12 @@ class Routing(OwnedCase):
              patch('progressor_core.weekly_plan.notification',return_value=weekly):
             return module.candidate(self.store,OWNER,settings,NOW)
     def activate(self):self.store.install('CREATE TABLE '+POLICY_OBJECTS[0]+'(arbitrary);')
-    def test_absent_policy_preserves_free_numeric_and_legacy_unclassified_candidates(self):
+    def test_full_reader_absent_policy_keeps_only_numeric_legacy_compatibility(self):
         before=self.store.digest()
         for ident in ('workout:session:7','workout:10','workout:old:7',None):
             with self.subTest(entity_id=ident):
-                self.assertEqual(self.call(workouts=[workout(ident)]),EXPECTED_POST)
+                expected=EXPECTED_POST if ident=='workout:10' else None
+                self.assertEqual(self.call(workouts=[workout(ident)]),expected)
         self.assertEqual(self.store.changed,0)
         self.assertEqual(self.store.digest(),before)
 
@@ -240,11 +241,11 @@ class Routing(OwnedCase):
         self.store.seen.clear();self.store.dismissed=True
         self.assertIsNone(self.call(workouts=rows))
 
-    def test_policy_read_is_once_and_never_writes_during_candidate_calculation(self):
+    def test_unknown_free_never_reads_admission_or_writes_during_candidate_calculation(self):
         self.activate()
         before=self.store.digest();self.store.queries.clear()
         self.assertIsNone(self.call(workouts=[workout(),workout('workout:session:8')]))
-        self.assertEqual(len(self.store.queries),1)
+        self.assertEqual(len(self.store.queries),0)
         self.assertEqual(self.store.changed,0)
         self.assertEqual(self.store.digest(),before)
 

@@ -42,7 +42,7 @@ class Connections(unittest.TestCase):
         self.store.reconcile('gym',snapshot('gym',self.paths['gym']))
         for i,day in enumerate(('2026-09-24','2026-09-29','2026-10-01','2026-10-06','2026-10-08')):
             stamp=datetime.fromisoformat(day+'T12:00:00+00:00')
-            self.event('gym','workout:rhythm'+str(i),stamp,{'completed_at':stamp.isoformat(),'timezone':'Europe/Moscow','program_id':1,'day_index':1,'session_id':i+100,'session_complete':True,'strength_sets':5})
+            self.event('gym','workout:'+str(981000+i),stamp,{'completed_at':stamp.isoformat(),'timezone':'Europe/Moscow','program_id':1,'day_index':1,'session_id':i+100,'session_complete':True,'strength_sets':5})
     def test_preferences_are_cas_and_rest_preserves_subscription_and_choices(self):
         before=links.permitted_entities(self.store,self.uid,NOW)[2]
         p=self.change(paused=True,weekly_plan=True,notifications=False)
@@ -87,7 +87,7 @@ class Connections(unittest.TestCase):
         self.workouts();p=proposal(self.store,self.uid,NOW);confirm(self.store,self.uid,p['fingerprint'],p['base_goal_key'],100,NOW)
         self.change(paused=True);self.assertIsNone(active(self.store,self.uid,NOW));self.change(paused=False)
         stamp=NOW+timedelta(hours=1)
-        self.event('gym','workout:outside',stamp,{'completed_at':stamp.isoformat(),'timezone':'UTC','program_id':1,'session_complete':True})
+        self.event('gym','workout:982001',stamp,{'completed_at':stamp.isoformat(),'timezone':'UTC','program_id':1,'session_complete':True})
         self.assertIsNone(active(self.store,self.uid,stamp))
     def test_rhythm_proposes_after_two_weeks_but_never_applies_without_confirmation(self):
         self.workouts();p=proposal(self.store,self.uid,NOW)
@@ -107,7 +107,7 @@ class Connections(unittest.TestCase):
         self.assertIsNone(active(self.store,self.uid,NOW));disable(self.store,self.uid)
     def test_changed_program_or_variable_days_do_not_form_habit(self):
         self.workouts();stamp=NOW-timedelta(days=2)
-        self.event('gym','workout:other',stamp,{'completed_at':stamp.isoformat(),'timezone':'Europe/Moscow','program_id':2,'session_complete':True})
+        self.event('gym','workout:982002',stamp,{'completed_at':stamp.isoformat(),'timezone':'Europe/Moscow','program_id':2,'session_complete':True})
         self.assertNotEqual(proposal(self.store,self.uid,NOW)['status'],'proposal')
     def test_redistribution_rejects_invalid_unknown_and_too_low_carbs(self):
         base={'kcal':2200,'protein':100,'fat':80,'carbs':250}

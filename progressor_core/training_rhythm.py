@@ -5,10 +5,11 @@ from .adapters import zone
 from .connections import permitted_entities,preferences
 from .contracts import canonical,digest,subject
 from shared.day_goal import redistribute,goal_key
+from .workout_time import known_workout
 
 def proposal(store,user_id,now=None,*,snapshot=None):
     now=now or datetime.now(timezone.utc);entities,_,_=permitted_entities(store,user_id,now,snapshot=snapshot)
-    records=sorted([e for e in entities if e['source']=='gym' and e['entity_id'].startswith('workout:')
+    records=sorted([e for e in entities if known_workout(e,completed=True,now=now)
         and e['payload'].get('session_complete',True) and e['payload'].get('program_id') is not None
         and not e['payload'].get('backfilled')],key=lambda e:e['payload']['completed_at'])
     result={'status':'insufficient_history','minimum_days':14,'message':'Сначала наблюдаем две недели занятий по одной системе. Незаписанный день не считаем днём отдыха.'}
@@ -59,7 +60,7 @@ def active(store,user_id,now=None,*,snapshot=None):
     if not row:return None
     body=json.loads(row['body']);goal=next((e for e in entities if e['source']=='food' and e['entity_id'].startswith('target:')),None)
     if not goal or goal_key(goal['payload']['targets'])!=body['base_goal_key'] or goal['event_id']!=body.get('goal_event_id'):return None
-    recent=[e for e in entities if e['source']=='gym' and e['entity_id'].startswith('workout:') and e['payload'].get('session_complete',True) and not e['payload'].get('backfilled')]
+    recent=[e for e in entities if known_workout(e,completed=True,now=now) and not e['payload'].get('backfilled')]
     if recent:
         last=max(recent,key=lambda e:e['payload']['completed_at'])
         if last['payload'].get('program_id')!=body['program_id']:return None

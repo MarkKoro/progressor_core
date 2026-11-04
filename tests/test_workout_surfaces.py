@@ -1,4 +1,5 @@
 import os,sqlite3,tempfile,unittest
+from datetime import datetime
 from pathlib import Path
 from test_integration import fixture,USER,NOW
 from progressor_core.adapters import snapshot
@@ -18,6 +19,12 @@ class WorkoutSurfaces(unittest.TestCase):
             db.execute("INSERT INTO session_exercises VALUES(21,701,1,'2026-10-07T10:00:00Z')")
             db.execute("INSERT INTO sets VALUES(31,21,0,701,12,0,30)")
             db.execute("INSERT INTO sets VALUES(32,21,0,702,99,0,99)")
+            # A genuine current touch proof is required for this positive free
+            # fixture. Atomic native writer behavior is tested separately.
+            db.executescript("CREATE TABLE progressor_free_sessions(session_id INTEGER PRIMARY KEY,last_activity REAL,status TEXT,completed_at TEXT,completion_basis TEXT,last_finished_at REAL);CREATE TABLE progressor_free_activity_proof(session_id INTEGER PRIMARY KEY,last_activity REAL,source_local_date TEXT,activity_timezone TEXT,proof_version INTEGER,clock_kind TEXT);")
+            clock=datetime.fromisoformat('2026-10-07T10:00:00+00:00').timestamp()
+            db.execute("INSERT INTO progressor_free_sessions VALUES(21,?,'active',NULL,NULL,NULL)",(clock,))
+            db.execute("INSERT INTO progressor_free_activity_proof VALUES(21,?,'2026-10-07','Europe/Moscow',1,'native_touch')",(clock,))
     def tearDown(self):self.tmp.cleanup()
     def sync(self):
         for source,path in self.paths.items():self.store.reconcile(source,snapshot(source,path))

@@ -353,3 +353,56 @@ UI37 is required by this backend-only scope; earlier evidence is not renamed as
 a newly executed run. A new source freeze, appropriate Linux/rollback checks,
 fresh bounded four-DB backup/off-server restore, normal FF main, existing
 update-all/strict verification and post-backup restore remain root release work.
+
+
+## Coordinated H08 candidate — 2026-10-28
+
+Prepared from the closed seventh release, Core77d75b8d/Gymb23b60d8 with Food
+5c18fd1d and Supply2aaa1b17 unchanged. Baseline367 selected files becomes373
+(Core140/Gym71/Food75/Supply87) through six additive source/test/document files.
+The source has one Core authority; shared UI/helpers, dependencies, updater,
+Food/Supply runtime and all three readiness gates remain unchanged.
+
+Native D1 V2, strict reader V4 and durable admission D3 final have independent
+reviews and22/25/27 focused methods respectively. Actual composed native→Core
+six scenarios and whole-package fallback three scenarios passed on the exact
+combined runtime. These overlap focused assertions and are not nine new unique
+suite methods. Source proof, travel, explicit/idle finish, owner incarnation,
+terminal repair/revocation, retained Food delivery state and actual77 fallback
+are documented in FREE_WORKOUT_NOTIFICATIONS.md.
+
+The first Windows Core476 run failed:67 Windows cleanup/replace errors, six
+other errors, seven failures and29 Linux-only skips. Its receipt/log remain
+retained; it is not reported as a Core pass. Six test-only fixture corrections
+preserve intended canonical numeric programmed positive controls, add a real
+source-equivalent witness to the partial free positive fixture, and require
+current unknown free routing to fail closed. Fifteen affected methods passed
+with the corrected local fixtures; runtime bytes and negative assertions were
+preserved. No67-error production workaround or lowered validator is introduced.
+
+This entry describes the candidate before canonical full Linux/release gates.
+The local action journal records their actual source hashes, exit status,
+ordinary main revisions and installation only when observed. The seventh
+fallback remains installed until the full coordinated package is verified.
+Preserve E and later user/paid writes across code rollback; no DB restore,
+policy deletion, new sender/consumer, provider call or manual gate is introduced.
+
+
+## Prepublication schema comparison correction — 2026-10-31
+
+The first held H08 composition passed Linux1029 and the separate four additional
+compound scenarios, without publication or installation. A subsequent negative
+schema probe found that whole-DDL casefold could accept changed CHECK literals.
+That exact attempt, its real results and its pre-backup remain preserved; they
+are not renamed as results for corrected runtime bytes.
+
+The corrected candidate changes only the Core schema normalizer and one new
+permanent regression, plus this documentation. Quote contents remain exact;
+malformed retained policy disables free notification admission without resetting
+E or blocking ordinary journals. The focused admission suite has28 methods.
+Final acceptance is planned as Core477/Gym266/Food192/Supply95,1030 total,
+fresh Node35 and fresh source-bound native/Core/fallback/extra compound checks.
+New gates have not been claimed complete in this source entry. A new fresh
+bounded restored pre-backup must follow them before main/update-all. The actual
+installed seventh fallback, all three readiness gates, Food delivery state and
+the sole deployment engine remain unchanged.
