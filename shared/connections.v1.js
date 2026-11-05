@@ -3,7 +3,7 @@
   'use strict';
   const source=document.currentScript?.dataset.progressorSource;
   const names={food:'Food',gym:'Gym Diary',supply:'Supply'};
-  let dialog,content,notice,opener,current,busy=false,todayReload,viewGeneration=0,settingsRequest=0,openRequest=0,disposeReadiness,preferenceFields=new Map();
+  let dialog,content,notice,opener,current,busy=false,todayReload,viewGeneration=0,settingsRequest=0,openRequest=0,disposeReadiness,preferenceFields=new Map(),ownedAction;
   const el=(tag,text,parent)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(parent)parent.append(n);return n;};
   async function api(path,body,signal){
     let r;
@@ -47,6 +47,60 @@
       clearTimeout(timeout);
       for(const {field,disabled} of owned)if(field.isConnected&&generation===viewGeneration)field.disabled=disabled;
     }
+  }
+  // Coach/rhythm mutations own their acknowledgement and following read. A
+  // disposed UI cannot cancel a committed server action or retry its POST.
+  function actionContext(){
+    const progressor=window.Progressor;if(!progressor)return null;
+    const bridge=progressor._launchBridge?.source===source?progressor._launchBridge:null;
+    try{const state=bridge?.getState();return {progressor,bridge,ready:progressor.ready,
+      owner:bridge?String(state?.session?.user?.id||''):'',proof:bridge?state?.launchData||'':progressor.launchData||'',
+      sdk:bridge?'':window.Telegram?.WebApp?.initData||''};}catch{return null;}
+  }
+  function sameActionContext(expected){const value=actionContext();return !!expected&&!!value&&Object.keys(expected).every(key=>expected[key]===value[key]);}
+  const actionCurrent=owner=>ownedAction===owner&&owner.opening===openRequest&&settingsCurrent(owner.request,owner.generation)&&sameActionContext(owner.context);
+  function disposeOwnedAction(){const owner=ownedAction;if(!owner)return;ownedAction=undefined;busy=false;owner.controller?.abort();}
+  async function actionRequest(owner,body){
+    const controller=new AbortController();owner.controller=controller;let timeout;
+    try{return await Promise.race([api('',body,controller.signal),new Promise((_,reject)=>{
+      timeout=setTimeout(()=>{controller.abort();reject(new Error('Не удалось получить подтверждение. Введённый выбор остаётся на экране. Обновите настройки, чтобы проверить результат.'));},8000);
+    })]);}finally{clearTimeout(timeout);if(owner.controller===controller)owner.controller=undefined;}
+  }
+  function actionButton(label,parent,body,message,options={}){
+    const born={generation:viewGeneration,opening:openRequest,context:actionContext()};
+    const b=el('button',label,parent);b.type='button';
+    b.addEventListener('click',async()=>{
+      if(busy||!b.isConnected||!dialog?.open||born.generation!==viewGeneration||born.opening!==openRequest)return;
+      if(!sameActionContext(born.context)){notice.textContent='Сессия изменилась. Заново откройте настройки из своего приложения.';return;}
+      const owner={...born,request:++settingsRequest};ownedAction=owner;busy=true;
+      const fields=[...parent.querySelectorAll('input,select,button')].map(field=>({field,disabled:field.disabled}));
+      for(const {field} of fields)field.disabled=true;b.disabled=true;notice.textContent='';
+      let acknowledged=options.acknowledged===true;
+      try{
+        if(body){await actionRequest(owner,body());acknowledged=true;}
+        if(!actionCurrent(owner))return;
+        const value=await actionRequest(owner);
+        if(!actionCurrent(owner))return;
+        // Read at completion, not before POST/GET: unrelated editable fields
+        // can change while either request is in flight.
+        const draft=options.discard?[]:dirtyPreferences();current=value;
+        const remaining=render(draft);notice.textContent=message+(remaining?' В других разделах есть несохранённые изменения.':'');
+      }catch(e){
+        if(!actionCurrent(owner))return;
+        if(acknowledged){
+          notice.textContent=message+' Но настройки не обновились. Несохранённый выбор остаётся на экране.';
+          actionButton('Повторить обновление настроек',notice,null,message,{acknowledged:true});
+        }else{
+          notice.textContent=String(e.message||e);
+          if(e.status===409)actionButton('Обновить данные',notice,null,'Настройки обновлены.',{discard:true});
+          else actionButton('Обновить настройки',notice,null,'Настройки обновлены.');
+        }
+      }finally{
+        for(const {field,disabled} of fields)if(field.isConnected&&owner.generation===viewGeneration)field.disabled=disabled;
+        if(b.isConnected&&owner.generation===viewGeneration)b.disabled=false;
+        if(ownedAction===owner){ownedAction=undefined;busy=false;}
+      }
+    });return b;
   }
   function todaySection(parent,participation,generation){
     const overview=section('Сегодня вместе',parent);overview.open=true;overview.dataset.todayOverview='';
@@ -140,10 +194,10 @@
     button('Предпросмотр моей недели',weekly,async()=>{const v=await api('/weekly-plan');weekly.querySelector('[data-plan-preview]')?.remove();const box=el('p',v.text,weekly);box.dataset.planPreview='';box.style.whiteSpace='pre-line';});
     const rhythm=section('Питание по привычным дням тренировок',content),r=current.rhythm;
     el('p',r.proposal.message,rhythm);
-    if(r.active){el('p','Ритм подтверждён. Общая сумма калорий за неделю сохранена. При смене цели, системы тренировок, отключении связи или окончании срока вернётся обычная цель.',rhythm);button('Вернуться к одинаковой цели каждый день',rhythm,async()=>{await api('',{action:'rhythm_off'});await refresh();});}
+    if(r.active){el('p','Ритм подтверждён. Общая сумма калорий за неделю сохранена. При смене цели, системы тренировок, отключении связи или окончании срока вернётся обычная цель.',rhythm);actionButton('Вернуться к одинаковой цели каждый день',rhythm,()=>({action:'rhythm_off'}),'Возвращена одинаковая цель каждый день.');}
     else if(r.proposal.status==='proposal'){
       const labels=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];el('p','Повторяются: '+r.proposal.weekdays.map(d=>labels[d]).join(', ')+'. Это предварительное наблюдение за двумя неделями.',rhythm);
-      for(const plan of r.proposal.previews){const box=el('div',undefined,rhythm);el('p',plan.training_extra_kcal===0?'Подтвердить ритм без изменения КБЖУ':`В день тренировки +${plan.training_extra_kcal} ккал; в остальные дни меньше на ту же недельную сумму. Белок и жиры остаются прежними.`,box);el('small',plan.days.map((d,i)=>labels[i]+': '+Math.round(d.kcal)+' ккал').join(' · '),box);button('Подтвердить этот вариант на 28 дней',box,async()=>{await api('',{action:'rhythm',fingerprint:r.proposal.fingerprint,base_goal_key:r.proposal.base_goal_key,extra:plan.training_extra_kcal});await refresh();notice.textContent='Ритм подтверждён. Food применит выбранный вариант после синхронизации. Недельная сумма сохранена.';});}
+      for(const plan of r.proposal.previews){const box=el('div',undefined,rhythm);el('p',plan.training_extra_kcal===0?'Подтвердить ритм без изменения КБЖУ':`В день тренировки +${plan.training_extra_kcal} ккал; в остальные дни меньше на ту же недельную сумму. Белок и жиры остаются прежними.`,box);el('small',plan.days.map((d,i)=>labels[i]+': '+Math.round(d.kcal)+' ккал').join(' · '),box);actionButton('Подтвердить этот вариант на 28 дней',box,()=>({action:'rhythm',fingerprint:r.proposal.fingerprint,base_goal_key:r.proposal.base_goal_key,extra:plan.training_extra_kcal}),'Ритм подтверждён. Food применит выбранный вариант после синхронизации. Недельная сумма сохранена.');}
     }
     const atlas=section('Найти нутриент в еде',content);
     const clock=section('Проверить часовой пояс напоминаний',content);
@@ -189,8 +243,8 @@
       const duration=el('select',undefined,row);duration.setAttribute('aria-label','Срок разрешения');
       for(const days of [7,30,90]){const option=el('option',days+' дней',duration);option.value=days;}duration.value=30;
       if(item.expires_at)el('small','Разрешение до '+new Date(item.expires_at*1000).toLocaleDateString('ru-RU'),row);
-      button('Сохранить разрешения',row,async()=>{await api('',{action:'coach',coach_id:item.coach_id,macros:macros.checked,top_dishes:macros.checked&&dishes.checked,days:Number(duration.value)});await refresh();notice.textContent='Разрешения обновлены.';});
-      button('Отозвать доступ к питанию',row,async()=>{await api('',{action:'coach',coach_id:item.coach_id,macros:false,top_dishes:false,days:30});await refresh();notice.textContent='Доступ к питанию отозван.';});
+      actionButton('Сохранить разрешения',row,()=>({action:'coach',coach_id:item.coach_id,macros:macros.checked,top_dishes:macros.checked&&dishes.checked,days:Number(duration.value)}),'Разрешения обновлены.');
+      actionButton('Отозвать доступ к питанию',row,()=>({action:'coach',coach_id:item.coach_id,macros:false,top_dishes:false,days:30}),'Доступ к питанию отозван.');
     }
     const overview=section('Моя неделя',content);button('Показать недельный обзор',overview,async()=>{
       const v=await api('/weekly');overview.querySelector('[data-week]')?.remove();const box=el('div',undefined,overview);box.dataset.week='';
@@ -259,20 +313,30 @@
     return dirtyPreferences().length;
   }
   async function open(){
+    disposeOwnedAction();
     if(!dialog?.open)opener=document.activeElement;
     if(!dialog){
-      const style=el('style',`#progressor-connections{box-sizing:border-box;width:min(94vw,620px);max-height:88vh;border:1px solid var(--border,#46516b);border-radius:18px;background:var(--card,#14213d);color:var(--text,#fff);padding:18px;font:15px system-ui}#progressor-connections::backdrop{background:#0009}#progressor-connections button{box-sizing:border-box;min-height:44px;border:1px solid var(--border,#64748b);border-radius:10px;padding:9px 12px;margin:5px 0;background:var(--card,#243657);color:inherit;font:inherit;cursor:pointer}#progressor-connections select{max-width:100%;min-height:44px;margin:8px;border-radius:8px;background:var(--card,#243657);color:inherit;padding:8px}#progressor-connections details{padding:10px 0;border-top:1px solid var(--border,#46516b)}#progressor-connections summary{cursor:pointer;min-height:38px;display:flex;align-items:center;font-weight:600}#progressor-connections .link-toggle{display:flex;align-items:center;gap:10px;min-height:44px;margin:5px 0}#progressor-connections input[type=checkbox]{width:22px;height:22px;flex:none}#progressor-connections small{display:block;line-height:1.5;opacity:.85}#progressor-connections p{line-height:1.5}#progressor-connections :focus-visible{outline:3px solid #60a5fa;outline-offset:2px}`,document.head);
+      const style=el('style',`#progressor-connections{box-sizing:border-box;width:min(94vw,620px);max-width:calc(100% - 16px);max-height:88vh;border:1px solid var(--border,#46516b);border-radius:18px;background:var(--card,#14213d);color:var(--text,#fff);padding:18px;font:15px system-ui}#progressor-connections[open]{display:flex;flex-direction:column;overflow:hidden}#progressor-connections .link-body{min-height:0;overflow:auto;overscroll-behavior:contain;padding:6px;flex:1 1 auto;overflow-wrap:anywhere}#progressor-connections::backdrop{background:#0009}#progressor-connections button{box-sizing:border-box;max-width:100%;white-space:normal;overflow-wrap:anywhere;min-height:44px;border:1px solid var(--border,#64748b);border-radius:10px;padding:9px 12px;margin:5px 0;background:var(--card,#243657);color:inherit;font:inherit;cursor:pointer}#progressor-connections select{box-sizing:border-box;font:inherit;max-width:calc(100% - 16px);min-height:44px;margin:8px;border-radius:8px;background:var(--card,#243657);color:inherit;padding:8px}#progressor-connections details{padding:10px 0;border-top:1px solid var(--border,#46516b)}#progressor-connections summary{cursor:pointer;min-height:38px;display:flex;align-items:center;font-weight:600}#progressor-connections .link-toggle{display:flex;align-items:center;gap:10px;min-height:44px;margin:5px 0}#progressor-connections .link-toggle span{min-width:0;overflow-wrap:anywhere}#progressor-connections input[type=checkbox]{width:22px;height:22px;flex:none}#progressor-connections small{display:block;line-height:1.5;opacity:.85}#progressor-connections p{line-height:1.5}#progressor-connections :focus-visible{outline:3px solid #60a5fa;outline-offset:2px}`,document.head);
       dialog=el('dialog',undefined,document.body);dialog.id='progressor-connections';dialog.setAttribute('aria-labelledby','progressor-link-title');
       const heading=el('div',undefined,dialog);heading.className='link-heading';el('h2','Связь продуктов',heading).id='progressor-link-title';
       const close=el('button','×',heading);close.type='button';close.setAttribute('aria-label','Закрыть');close.addEventListener('click',()=>dialog.close());
-      notice=el('p',undefined,dialog);notice.setAttribute('role','status');content=el('div',undefined,dialog);
-      el('style','#progressor-connections [data-source-readiness] span{display:block}#progressor-connections .link-source{margin-bottom:10px}#progressor-connections .link-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}#progressor-connections .link-heading h2{min-width:0;margin:0;overflow-wrap:anywhere}#progressor-connections .link-heading button{flex:none;min-width:44px}',document.head);
+      const body=el('div',undefined,dialog);body.className='link-body';
+      notice=el('p',undefined,body);notice.setAttribute('role','status');content=el('div',undefined,body);
+      el('style','#progressor-connections [data-source-readiness] span{display:block}#progressor-connections .link-source{margin-bottom:10px}#progressor-connections .link-heading{display:flex;flex:none;align-items:center;justify-content:space-between;gap:12px}#progressor-connections .link-heading h2{min-width:0;margin:0;overflow-wrap:anywhere}#progressor-connections .link-heading button{flex:none;min-width:44px}',document.head);
       // Host card colors can be translucent; the modal needs an opaque surface.
       el('style','#progressor-connections{background:#14213d;color:#f1f5f9}#progressor-connections button,#progressor-connections select{background:#243657;color:#f1f5f9;border-color:#64748b}#progressor-connections,#progressor-connections *{font-family:system-ui,-apple-system,"Segoe UI",sans-serif!important}#progressor-connections input:not([type=checkbox]){box-sizing:border-box;max-width:100%;min-height:44px;padding:8px;border:1px solid #64748b;border-radius:8px;background:#243657;color:#f1f5f9}',document.head);
-      dialog.addEventListener('close',()=>{disposeReadiness?.();disposeReadiness=undefined;preferenceFields.clear();viewGeneration++;openRequest++;opener?.focus();});
+      dialog.addEventListener('close',()=>{disposeOwnedAction();disposeReadiness?.();disposeReadiness=undefined;preferenceFields.clear();viewGeneration++;openRequest++;opener?.focus();});
       dialog.addEventListener('keydown',event=>{
         if(event.key!=='Tab')return;
-        const controls=[...dialog.querySelectorAll('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary,[tabindex="0"]')].filter(n=>n.getClientRects().length&&!n.closest('[hidden]'));
+        const controls=[...dialog.querySelectorAll('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary,[tabindex="0"]')].filter(n=>{
+          if(!n.getClientRects().length||n.closest('[hidden]'))return false;
+          for(let parent=n.parentElement;parent&&parent!==dialog;parent=parent.parentElement){
+            if(parent.tagName.toLowerCase()!=='details'||parent.open)continue;
+            const summary=[...parent.children].find(child=>child.tagName.toLowerCase()==='summary');
+            if(!summary?.contains(n))return false;
+          }
+          return true;
+        });
         const first=controls[0],last=controls[controls.length-1];
         if(!first){event.preventDefault();dialog.focus();return;}
         if(event.shiftKey&&(document.activeElement===first||!dialog.contains(document.activeElement))){event.preventDefault();last.focus();}

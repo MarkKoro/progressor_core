@@ -165,12 +165,12 @@
   function ensureSubscriptions(panel) {
     if(subscriptionBox?.isConnected) return subscriptionBox;
     subscriptionBox=element('section',undefined,panel);subscriptionBox.id='progressor-subscriptions';
-    const header=element('div',undefined,subscriptionBox);header.className='progressor-subscription-heading';element('strong','Мои подписки',header);
-    const close=element('button','×',header);close.type='button';close.setAttribute('aria-label','Закрыть подписки');close.onclick=()=>{panel.hidden=true;document.querySelector('[aria-controls="progressor-context"]')?.setAttribute('aria-expanded','false');};
+    const header=element('div',undefined,panel);header.className='progressor-subscription-heading';element('strong','Мои подписки',header);
+    const close=element('button','×',header);close.type='button';close.setAttribute('aria-label','Закрыть подписки');close.onclick=()=>{const toggle=document.querySelector('[aria-controls="progressor-context"]');panel.hidden=true;toggle?.setAttribute('aria-expanded','false');toggle?.focus();};
     const summary=element('p','',subscriptionBox);summary.dataset.accessSummary='';summary.setAttribute('aria-live','polite');
     const grid=element('div',undefined,subscriptionBox);grid.dataset.products='';grid.className='progressor-products';
     const detail=element('div',undefined,subscriptionBox);detail.dataset.purchaseOptions='';detail.id='progressor-bundle';
-    panel.prepend(subscriptionBox);renderProducts();return subscriptionBox;
+    panel.prepend(header,subscriptionBox);renderProducts();return subscriptionBox;
   }
   async function loadSubscriptions(panel) {
     ensureSubscriptions(panel);if(subscriptionLoading)return;subscriptionLoading=true;
@@ -274,7 +274,7 @@
       body[data-progressor-domain="gym"] .app-header{top:var(--progressor-bar-height)}
       body[data-progressor-domain="supply"] #app{height:calc(100% - var(--progressor-bar-height));margin-top:var(--progressor-bar-height)}
       #progressor-shell{position:fixed;top:0;left:0;right:0;z-index:24;isolation:isolate;color:#f1f5f9;font:13px system-ui;background:#13213d;border-bottom:1px solid var(--border,#46516b);padding:calc(2px + env(safe-area-inset-top,0px)) 8px 2px;}
-      #progressor-shell nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;max-width:900px;margin:auto;}
+      #progressor-shell nav{display:grid;grid-template-columns:minmax(44px,1.3fr) minmax(44px,.7fr) minmax(44px,.8fr) minmax(44px,1.2fr);gap:4px;max-width:900px;margin:auto;}
       #progressor-shell *{font-family:inherit;box-sizing:border-box}
       #progressor-shell{box-sizing:border-box;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
       #progressor-shell a,#progressor-shell button{display:flex;align-items:center;justify-content:center;min-height:48px;border:0;border-radius:10px;color:inherit;background:transparent;text-decoration:none;cursor:pointer;font:600 12px system-ui;}
@@ -307,7 +307,9 @@
       #progressor-subscriptions{padding-bottom:16px;border-bottom:1px solid var(--border,#46516b)}
       #progressor-subscriptions h3{margin:16px 0 8px;font-size:16px}
       #progressor-subscriptions small{font-size:12px;line-height:1.45;display:block}
-      .progressor-subscription-heading{display:flex;align-items:center;justify-content:space-between;font-size:17px}
+      .progressor-subscription-heading{display:flex;align-items:center;justify-content:space-between;font-size:17px;position:sticky;top:-14px;z-index:2;gap:12px;background:#13213d;margin-top:-14px;padding-top:14px;margin-bottom:8px}
+      .progressor-subscription-heading strong{min-width:0;overflow-wrap:anywhere}
+      #progressor-shell .progressor-subscription-heading button{flex:none;min-width:44px}
       #progressor-shell .progressor-products{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
       #progressor-shell .progressor-product{position:relative;display:flex;flex-direction:column;justify-content:flex-start;gap:8px;padding:12px 7px;border:1px solid #64748b;background:#1e3152;color:#f1f5f9;min-width:0;text-align:center;white-space:normal;overflow-wrap:anywhere;font-size:13px}
       #progressor-shell .progressor-product[aria-pressed=true]{border:2px solid #60a5fa;padding:11px 6px}

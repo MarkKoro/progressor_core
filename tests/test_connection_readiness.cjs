@@ -14,7 +14,7 @@ function today(status='stale'){
  const [label,message]=reasons[status]||['Unknown future label','Unknown future message'];
  return {sections:[{source:'food',name:'Food',text:'One recorded meal'}],health:{items:[{source:'supply',name:'Supply',status,label,message}],hints_enabled:true,notifications_enabled:true,rest_active:status==='paused'},generated_at:'2026-10-23T00:00:00Z',day_label:'Fixture Moscow journal day',coverage:'Only saved records'};
 }
-function harness(){
+function harness({ignoreAbort=false}={}){
  const requests=[],timers=[];let document;
  class Node{
   constructor(tag){this.tagName=tag;this.parentElement=null;this.children=[];this.dataset={};this.attrs={};this.listeners={};this.style={};this.checked=false;this.disabled=false;this.open=false;this._text='';}
@@ -32,7 +32,17 @@ function harness(){
   remove(){if(this.parentElement){const parent=this.parentElement;parent.children=parent.children.filter(n=>n!==this);this.parentElement=null;}}
   get isConnected(){return this===document.head||this===document.body||!!this.parentElement?.isConnected;}
   getBoundingClientRect(){return {height:this.measuredHeight??60};}
+  // Closed-details descendants may still report rectangles in the observed browser.
+  // This generic seam intentionally leaves that exclusion to the actual key handler.
+  getClientRects(){return this.isConnected?[this.getBoundingClientRect()]:[];}
+  contains(node){for(let n=node;n;n=n.parentElement)if(n===this)return true;return false;}
+  closest(selector){for(let n=this;n;n=n.parentElement)if(n.matches(selector))return n;return null;}
   matches(selector){
+   const enabled=selector.match(/^(button|input|select|textarea):not\(:disabled\)$/);
+   if(enabled)return this.tagName===enabled[1]&&!this.disabled;
+   if(selector==='a[href]')return this.tagName==='a'&&this.getAttribute('href')!==null;
+   if(selector==='[tabindex="0"]')return this.getAttribute('tabindex')==='0';
+   if(selector==='[hidden]')return !!this.hidden||this.getAttribute('hidden')!==null;
    if(selector.startsWith('#'))return this.id===selector.slice(1);
    const data=selector.match(/^\[data-([\w-]+)(?:="([^"]*)")?\]$/);
    if(data){const key=data[1].replace(/-([a-z])/g,(_,c)=>c.toUpperCase());return Object.hasOwn(this.dataset,key)&&(data[2]===undefined||this.dataset[key]===data[2]);}
@@ -47,7 +57,7 @@ function harness(){
  const window={Progressor:{ready:Promise.resolve()},...events()};document.fonts=events();
  const env={window,document,fetch:(url,options)=>new Promise((resolve,reject)=>{
    requests.push({url,options,reply:(body,status=200)=>resolve({ok:status>=200&&status<300,status,json:async()=>clone(body)})});
-   options.signal?.addEventListener('abort',()=>reject(Error('Synthetic request aborted')),{once:true});
+   options.signal?.addEventListener('abort',()=>{if(!ignoreAbort)reject(Error('Synthetic request aborted'));},{once:true});
   }),
   Event:class{constructor(type){this.type=type;}},AbortController,Intl,Date,console,crypto:{randomUUID:()=> 'fixture-id'},setInterval:()=>1,clearInterval(){},
   setTimeout:(fn,ms)=>{timers.push({fn,ms,active:true});return timers.length;},clearTimeout:id=>{if(timers[id-1])timers[id-1].active=false;},location:{pathname:'/webapp/'}};
@@ -62,7 +72,8 @@ function harness(){
  const take=(method='GET',suffix='')=>{const index=requests.findIndex(r=>r.options.method===method&&r.url==='/progressor/api/v1/me/connections'+suffix);assert.ok(index>=0,'expected request '+method+' '+suffix);return requests.splice(index,1)[0];};
  const open=async(value=settings(),body=today())=>{const call=window.Progressor.openConnections();await flush();take().reply(value);await flush();take('GET','/today?target=food').reply(body);await call;await flush();};
  const fireTimeout=ms=>{const active=timers.filter(t=>t.active&&t.ms===ms);assert.equal(active.length,1,'one owned timeout');for(const t of active){t.active=false;t.fn();}};
- return {document,window,launcher,requests,note,input,toggle,flush,take,open,fireTimeout,notes:()=>document.body.querySelectorAll('[data-source-readiness]'),closeButton:()=>findButton('×'),close:()=>document.body.querySelector('#progressor-connections').close(),click:text=>{const button=findButton(text);assert.ok(button,'button '+text);return button.dispatchEvent({type:'click'});}};
+ let authState;const bridge={source:'food',getState:()=>authState};const setAuth=(owner,proof)=>{authState={launchData:proof,session:{user:{id:owner}}};window.Progressor._launchBridge=bridge;};
+ return {document,window,launcher,requests,note,input,toggle,flush,take,open,fireTimeout,setAuth,notes:()=>document.body.querySelectorAll('[data-source-readiness]'),closeButton:()=>findButton('×'),close:()=>document.body.querySelector('#progressor-connections').close(),click:text=>{const button=findButton(text);assert.ok(button,'button '+text);return button.dispatchEvent({type:'click'});}};
 }
 
 // These preference cases exercise public UI/partial-request boundaries, not a
@@ -74,7 +85,7 @@ function preferenceControls(h){
  const weekly=section('Один план питания в неделю'),food=section('Пищевые предпочтения'),day=section('Итог дня без обязательных отметок');
  return {source:h.input(),weekly:weekly.querySelector('input'),weekday:weekly.querySelectorAll('select')[0],hour:weekly.querySelectorAll('select')[1],diet:food.querySelector('select'),fish:all(food).find(n=>n.tagName==='label'&&n.textContent==='Исключить: Рыба')?.querySelector('input'),day:day?.querySelector('input')};
 }
-const noticeText=h=>h.document.body.querySelector('#progressor-connections').children.find(n=>n.tagName==='p'&&n.getAttribute('role')==='status').textContent;
+const noticeText=h=>h.document.body.querySelector('#progressor-connections').querySelectorAll('p').find(n=>n.getAttribute('role')==='status').textContent;
 const connectionKeys=['sources','hints','notifications','weight_notifications','goal_links','frequency'];
 async function confirmPreferences(h,label,server,keys,beforeFresh){
  const saving=h.click(label);await h.flush();const post=h.take('POST'),body=JSON.parse(post.options.body);
@@ -84,7 +95,7 @@ async function confirmPreferences(h,label,server,keys,beforeFresh){
  return {next,body};
 }
 
-async function main(){const passed=[];async function test(name,fn){await fn();passed.push(name);}
+async function main(){const passed=[];async function test(name,fn){try{await fn();passed.push(name);}catch(error){console.log(JSON.stringify({passed:false,cases:passed.length,names:passed,failed_case:name,network_or_provider_calls:0}));throw error;}}
  for(const status of ['stale','consent_required','access_required','ready','disabled','paused','future_status'])await test('inline '+status,async()=>{
   const h=harness(),enabled=status!=='disabled';await h.open(settings(enabled),today(status));assert.equal(h.input().checked,enabled);
   if(status==='future_status')assert.equal(h.note().textContent,unknown);
@@ -206,6 +217,102 @@ async function main(){const passed=[];async function test(name,fn){await fn();pa
  });
  for(const failure of [false,true])await test('old partial '+(failure?'failure':'success')+' cannot reapply captured drafts to reopened view',async()=>{
   const h=harness(),value=draftSettings();await h.open(value,draftToday(value.preferences));h.toggle(false);preferenceControls(h).hour.value=12;const saving=h.click('Сохранить время сводки');await h.flush();const old=h.take('POST');h.close();await h.open(value,draftToday(value.preferences));preferenceControls(h).diet.value='vegan';preferenceControls(h).hour.value=14;old.reply({preferences:{...value.preferences,weekly_hour:12,revision:1}},failure?503:200);await saving;await h.flush();assert.equal(h.input().checked,true);assert.equal(Number(preferenceControls(h).hour.value),14);assert.equal(preferenceControls(h).diet.value,'vegan');assert.equal(h.input().disabled,false);assert.equal(h.requests.length,0);
+ });
+
+ // These fixtures activate the real coach/rhythm callbacks omitted by the
+ // previous empty-coach/unavailable-rhythm seam. No backend/provider is run.
+ function actionSettings(kind='coach_save'){
+  const value=draftSettings();
+  value.coach={explanation:'Owned aggregate permission fixture',items:[{coach_id:'22',label:'Тренер fixture',macros:kind==='coach_revoke',top_dishes:kind==='coach_revoke',expires_at:null}]};
+  value.rhythm={proposal:{status:'proposal',message:'Owned rhythm fixture',weekdays:[1,3],fingerprint:'fixture-rhythm',base_goal_key:'fixture-goal',previews:[{training_extra_kcal:100,days:Array.from({length:7},()=>({kcal:2200}))}]},active:kind==='rhythm_off'?{training_extra_kcal:100}:null};
+  return value;
+ }
+ const actionLabel={coach_save:'Сохранить разрешения',coach_revoke:'Отозвать доступ к питанию',rhythm_apply:'Подтвердить этот вариант на 28 дней',rhythm_off:'Вернуться к одинаковой цели каждый день'};
+ function coachControls(h){const all=n=>[n,...n.children.flatMap(all)],b=all(h.document.body).find(n=>n.tagName==='button'&&n.textContent==='Сохранить разрешения'),row=b.parentElement;return {row,macros:row.querySelectorAll('input')[0],dishes:row.querySelectorAll('input')[1],days:row.querySelector('select'),save:b};}
+ function expectedAction(kind,h){if(kind==='coach_save'){const c=coachControls(h);c.macros.checked=true;c.dishes.checked=true;c.days.value=7;return {action:'coach',coach_id:'22',macros:true,top_dishes:true,days:7};}if(kind==='coach_revoke')return {action:'coach',coach_id:'22',macros:false,top_dishes:false,days:30};return kind==='rhythm_off'?{action:'rhythm_off'}:{action:'rhythm',fingerprint:'fixture-rhythm',base_goal_key:'fixture-goal',extra:100};}
+ function actionAck(body){return body.action==='coach'?{items:[{coach_id:body.coach_id,macros:body.macros,top_dishes:body.top_dishes}],explanation:'Owned acknowledgement'}:body.action==='rhythm_off'?{active:false}:{training_extra_kcal:body.extra,weekdays:[1,3],expires_at:2000000000};}
+ async function openAction(h,kind='coach_save'){h.setAuth('1','launch-A');const value=actionSettings(kind);await h.open(value,draftToday(value.preferences));return value;}
+ async function completeActionRead(h,click,value){await h.flush();h.take().reply(value);await click;await h.flush();h.take('GET','/today?target=food').reply(draftToday(value.preferences));await h.flush();}
+
+ for(const kind of Object.keys(actionLabel))await test(kind+' acknowledgement preserves unrelated live preference drafts',async()=>{
+  const h=harness(),value=await openAction(h,kind),body=expectedAction(kind,h);h.toggle(false);const fields=preferenceControls(h);fields.hour.value=13;fields.diet.value='vegan';fields.day.checked=false;
+  const click=h.click(actionLabel[kind]);await h.flush();const post=h.take('POST');assert.deepEqual(JSON.parse(post.options.body),body);post.reply(actionAck(body));await h.flush();
+  const next=clone(value);next.preferences.revision=3;await completeActionRead(h,click,next);
+  assert.equal(h.input().checked,false);assert.equal(Number(preferenceControls(h).hour.value),13);assert.equal(preferenceControls(h).diet.value,'vegan');assert.equal(preferenceControls(h).day.checked,false);assert.equal(h.note().textContent,unsaved);assert.ok(noticeText(h).includes('несохранённые'));assert.equal(h.requests.length,0);
+ });
+ await test('coach action preserves the latest edits made during POST and settings GET',async()=>{
+  const h=harness(),value=await openAction(h),body=expectedAction('coach_save',h);preferenceControls(h).hour.value=11;
+  const click=h.click(actionLabel.coach_save);await h.flush();const post=h.take('POST');assert.equal(h.input().disabled,false);preferenceControls(h).hour.value=12;post.reply(actionAck(body));await h.flush();const get=h.take();preferenceControls(h).hour.value=14;preferenceControls(h).diet.value='vegetarian';h.toggle(false);get.reply(value);await click;await h.flush();
+  assert.equal(Number(preferenceControls(h).hour.value),14);assert.equal(preferenceControls(h).diet.value,'vegetarian');assert.equal(h.input().checked,false);h.take('GET','/today?target=food').reply(draftToday(value.preferences));await h.flush();assert.equal(h.requests.length,0);
+ });
+ await test('coach action owns only its row fields while Close and preference inputs remain usable',async()=>{
+  const h=harness(),value=await openAction(h),body=expectedAction('coach_save',h),row=coachControls(h);const click=h.click(actionLabel.coach_save);await h.flush();const post=h.take('POST');
+  assert.equal(row.macros.disabled,true);assert.equal(row.dishes.disabled,true);assert.equal(row.days.disabled,true);assert.equal(h.input().disabled,false);assert.equal(preferenceControls(h).hour.disabled,false);assert.equal(h.closeButton().disabled,false);
+  await h.click(actionLabel.coach_save);assert.equal(h.requests.length,0);post.reply(actionAck(body));await completeActionRead(h,click,value);
+ });
+ for(const failure of [false,true])await test('old coach POST '+(failure?'failure':'success')+' cannot refresh or notice into a reopened form',async()=>{
+  const h=harness({ignoreAbort:true}),value=await openAction(h),body=expectedAction('coach_save',h);const click=h.click(actionLabel.coach_save);await h.flush();const old=h.take('POST');h.close();await h.open(value,draftToday(value.preferences));preferenceControls(h).hour.value=14;h.toggle(false);const before=noticeText(h);old.reply(actionAck(body),failure?503:200);await click;await h.flush();
+  assert.equal(h.requests.length,0);assert.equal(Number(preferenceControls(h).hour.value),14);assert.equal(h.input().checked,false);assert.equal(noticeText(h),before);
+ });
+ for(const failure of [false,true])await test('old rhythm refresh '+(failure?'failure':'success')+' cannot replace a reopened form',async()=>{
+  const h=harness({ignoreAbort:true}),value=await openAction(h,'rhythm_apply'),body=expectedAction('rhythm_apply',h);const click=h.click(actionLabel.rhythm_apply);await h.flush();h.take('POST').reply(actionAck(body));await h.flush();const old=h.take();h.close();await h.open(value,draftToday(value.preferences));preferenceControls(h).diet.value='vegan';const before=noticeText(h);old.reply(value,failure?503:200);await click;await h.flush();
+  assert.equal(h.requests.length,0);assert.equal(preferenceControls(h).diet.value,'vegan');assert.equal(noticeText(h),before);
+ });
+ for(const changed of ['proof','owner'])await test('coach acknowledgement ignores changed '+changed+' context before starting a refresh',async()=>{
+  const h=harness(),value=await openAction(h),body=expectedAction('coach_save',h);const click=h.click(actionLabel.coach_save);await h.flush();const old=h.take('POST');h.setAuth(changed==='owner'?'2':'1',changed==='proof'?'launch-B':'launch-A');preferenceControls(h).hour.value=13;const before=noticeText(h);old.reply(actionAck(body));await click;await h.flush();assert.equal(h.requests.length,0);assert.equal(Number(preferenceControls(h).hour.value),13);assert.equal(noticeText(h),before);
+ });
+ await test('rendered coach action refuses a changed account before any POST',async()=>{
+  const h=harness();await openAction(h);expectedAction('coach_save',h);h.setAuth('2','launch-B');await h.click(actionLabel.coach_save);await h.flush();assert.equal(h.requests.length,0);assert.ok(noticeText(h).includes('Сессия изменилась'));
+ });
+ await test('same owner and proof survive a normal bridge session object renewal',async()=>{
+  const h=harness(),value=await openAction(h),body=expectedAction('coach_save',h);const click=h.click(actionLabel.coach_save);await h.flush();const post=h.take('POST');h.setAuth('1','launch-A');post.reply(actionAck(body));await completeActionRead(h,click,value);assert.ok(noticeText(h).includes('Разрешения обновлены'));
+ });
+ await test('fallback launch context replacement ignores the old coach completion',async()=>{
+  const h=harness(),value=actionSettings();h.window.Progressor.launchData='fallback-A';await h.open(value,draftToday(value.preferences));const body=expectedAction('coach_save',h);const click=h.click(actionLabel.coach_save);await h.flush();const post=h.take('POST');h.window.Progressor.launchData='fallback-B';post.reply(actionAck(body));await click;await h.flush();assert.equal(h.requests.length,0);assert.ok(!noticeText(h).includes('Разрешения обновлены'));
+ });
+ await test('coach settings GET cannot render after the proof changes',async()=>{
+  const h=harness(),value=await openAction(h),body=expectedAction('coach_save',h);const click=h.click(actionLabel.coach_save);await h.flush();h.take('POST').reply(actionAck(body));await h.flush();const get=h.take();h.toggle(false);h.setAuth('1','launch-B');const before=noticeText(h);get.reply(value);await click;await h.flush();assert.equal(h.input().checked,false);assert.equal(noticeText(h),before);assert.equal(h.requests.length,0);
+ });
+ await test('current coach409 preserves drafts and offers explicit read-only discard refresh',async()=>{
+  const h=harness(),value=await openAction(h);expectedAction('coach_save',h);preferenceControls(h).hour.value=13;const click=h.click(actionLabel.coach_save);await h.flush();h.take('POST').reply({},409);await click;await h.flush();assert.equal(Number(preferenceControls(h).hour.value),13);assert.equal(coachControls(h).macros.disabled,false);assert.ok(noticeText(h).includes('сбросит несохранённый выбор'));
+  const refresh=h.click('Обновить данные');await h.flush();assert.equal(h.requests.length,1);await completeActionRead(h,refresh,value);assert.equal(Number(preferenceControls(h).hour.value),10);assert.equal(h.requests.length,0);
+ });
+ await test('coach POST deadline is bounded even when transport ignores abort and never retries the write',async()=>{
+  const h=harness({ignoreAbort:true}),value=await openAction(h),body=expectedAction('coach_save',h);preferenceControls(h).hour.value=13;const click=h.click(actionLabel.coach_save);await h.flush();const old=h.take('POST');h.fireTimeout(8000);await click;await h.flush();assert.equal(coachControls(h).macros.disabled,false);assert.equal(h.closeButton().disabled,false);assert.equal(Number(preferenceControls(h).hour.value),13);assert.equal(h.requests.length,0);assert.ok(noticeText(h).includes('Не удалось получить подтверждение'));assert.ok(!noticeText(h).includes('Разрешения обновлены'));
+  const retry=h.click('Обновить настройки');await h.flush();assert.equal(h.requests.length,1);await completeActionRead(h,retry,value);old.reply(actionAck(body));await h.flush();assert.equal(h.requests.length,0);assert.equal(Number(preferenceControls(h).hour.value),13);assert.ok(!noticeText(h).includes('Разрешения обновлены'));
+ });
+ for(const timedOut of [false,true])await test('acknowledged coach action with '+(timedOut?'timed-out':'failed')+' refresh offers only a draft-preserving read retry',async()=>{
+  const h=harness({ignoreAbort:timedOut}),value=await openAction(h),body=expectedAction('coach_save',h);preferenceControls(h).hour.value=12;const click=h.click(actionLabel.coach_save);await h.flush();h.take('POST').reply(actionAck(body));await h.flush();const get=h.take();if(timedOut)h.fireTimeout(8000);else get.reply({},503);await click;await h.flush();assert.equal(h.requests.length,0);assert.equal(Number(preferenceControls(h).hour.value),12);assert.ok(noticeText(h).includes('Разрешения обновлены'));assert.ok(noticeText(h).includes('настройки не обновились'));
+  const retry=h.click('Повторить обновление настроек');await h.flush();const read=h.take();assert.equal(read.options.method,'GET');preferenceControls(h).hour.value=14;read.reply(value);await retry;await h.flush();h.take('GET','/today?target=food').reply(draftToday(value.preferences));await h.flush();if(timedOut)get.reply(value);await h.flush();assert.equal(Number(preferenceControls(h).hour.value),14);assert.equal(h.requests.length,0);assert.ok(noticeText(h).includes('несохранённые'));
+ });
+ await test('old coach finally cannot unlock a newer preference write after close and reopen',async()=>{
+  const h=harness({ignoreAbort:true}),value=await openAction(h),body=expectedAction('coach_save',h);const oldClick=h.click(actionLabel.coach_save);await h.flush();const old=h.take('POST');h.close();await h.open(value,draftToday(value.preferences));h.toggle(false);const saving=h.click('Сохранить связи');await h.flush();const post=h.take('POST');old.reply(actionAck(body));await oldClick;await h.flush();assert.equal(h.input().disabled,true);await h.click(actionLabel.coach_save);await h.flush();assert.equal(h.requests.length,0);const next={...clone(value.preferences),sources:{...value.preferences.sources,supply:false},revision:1};post.reply({preferences:next});await saving;await h.flush();h.take('GET','/today?target=food').reply(draftToday(next));await h.flush();assert.equal(h.input().disabled,false);
+ });
+ await test('the next preference save uses the refreshed server revision without leaking coach fields',async()=>{
+  const h=harness(),value=await openAction(h),body=expectedAction('coach_save',h);preferenceControls(h).hour.value=13;const click=h.click(actionLabel.coach_save);await h.flush();h.take('POST').reply(actionAck(body));const next=clone(value);next.preferences.revision=8;await completeActionRead(h,click,next);const saving=h.click('Сохранить время сводки');await h.flush();const post=h.take('POST'),write=JSON.parse(post.options.body);assert.equal(write.revision,8);assert.deepEqual(Object.keys(write.patch).sort(),['weekly_plan','weekly_day','weekly_hour'].sort());assert.equal(write.patch.weekly_hour,13);post.reply({preferences:{...next.preferences,...write.patch,revision:9}});await saving;await h.flush();h.take('GET','/today?target=food').reply(draftToday(value.preferences));await h.flush();assert.equal(h.requests.length,0);
+ });
+
+ // Keyboard regressions execute the actual dialog listener. Synthetic appended
+ // controls give explicit known visible/closed/disabled boundaries, no layout claim.
+ await test('closed nested details cannot supply hidden keyboard boundaries',async()=>{
+  const h=harness();await h.open();const dialog=h.document.body.querySelector('#progressor-connections');
+  const add=(tag,parent,label)=>{const n=h.document.createElement(tag);if(label)n.textContent=label;parent.append(n);return n;};
+  const outer=add('details',dialog),summary=add('summary',outer,'Visible closed summary'),summaryChild=add('span',summary,'Visible summary child');summaryChild.setAttribute('tabindex','0');
+  const hiddenButton=add('button',outer,'Hidden direct action'),nested=add('details',outer);nested.open=true;add('summary',nested,'Hidden nested summary');const hiddenNestedButton=add('button',nested,'Hidden nested action');
+  assert.equal(hiddenButton.getClientRects().length,1);assert.equal(hiddenNestedButton.getClientRects().length,1);assert.equal(outer.open,false);
+  h.closeButton().focus();let prevented=false;await dialog.dispatchEvent({type:'keydown',key:'Tab',shiftKey:true,preventDefault(){prevented=true;}});
+  assert.equal(prevented,true,'reverse Tab is owned at the visible first boundary');assert.equal(h.document.activeElement,summaryChild,'only the closed details own summary and its children remain keyboard-visible');assert.equal(h.requests.length,0);
+ });
+ await test('Tab cycles both visible boundaries while open actions remain eligible',async()=>{
+  const h=harness();await h.open();const dialog=h.document.body.querySelector('#progressor-connections');
+  const add=(tag,parent,label)=>{const n=h.document.createElement(tag);if(label)n.textContent=label;parent.append(n);return n;};
+  const outer=add('details',dialog);outer.open=true;add('summary',outer,'Visible open summary');const nested=add('details',outer);add('summary',nested,'Visible nested closed summary');add('button',nested,'Hidden nested action');
+  const last=add('button',outer,'Visible final action'),disabled=add('button',outer,'Disabled later action');disabled.disabled=true;
+  const hidden=add('div',dialog);hidden.setAttribute('hidden','');add('button',hidden,'Hidden later action');
+  let prevented=false;last.focus();await dialog.dispatchEvent({type:'keydown',key:'Tab',shiftKey:false,preventDefault(){prevented=true;}});
+  assert.equal(prevented,true);assert.equal(h.document.activeElement,h.closeButton(),'forward Tab wraps from the actual visible final action');
+  prevented=false;await dialog.dispatchEvent({type:'keydown',key:'Tab',shiftKey:true,preventDefault(){prevented=true;}});
+  assert.equal(prevented,true);assert.equal(h.document.activeElement,last,'reverse Tab returns to the open section action, not a closed/hidden/disabled descendant');assert.equal(h.requests.length,0);
  });
 
  console.log(JSON.stringify({passed:true,cases:passed.length,names:passed,network_or_provider_calls:0,scope:'Whole canonical asset, deterministic DOM/event/request seam only'}));

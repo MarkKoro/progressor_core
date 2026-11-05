@@ -187,3 +187,44 @@ before switching. Preserve policy, source proof, additive triggers and later
 user/paid writes on rollback. There is no new generic H08 downgrade fence in
 the updater: arbitrary pre-shim/manual forced downgrade is unsupported. Keep
 the financial2/owner1/next-meal1 gates and Food delivery reservations unchanged.
+
+## Coach/rhythm callback ownership — ninth UI scope
+
+The four coach/rhythm actions in canonical connections.v1.js capture their open,
+render, request and available launch owner/proof context before POST. Their
+completion may update only that view. Lock the owned row while keeping Close
+and unrelated preference inputs available; preserve the latest registered dirty
+preferences at the following GET completion. The server revision remains the
+only authoritative revision; never add unrelated preference keys to that POST.
+
+Each POST/read has its own eight-second acknowledgement budget, including a
+transport which ignores abort. Close/timeout does not prove server cancellation.
+Separate a confirmed write from a failed following read; recovery reads only,
+with no automatic POST replay. Current409 retains its explicit draft-discard
+warning. This scope does not fix the generic button helper or other transient
+editors; rest has an immediate save action, not a separate editable draft.
+Run the whole-asset Node57 regression (previous35 plus22 coach/rhythm cases)
+and the explicit Linux deploy/run_core_checks.py entry. Browser geometry must
+be measured separately; a fake DOM or an auto-scrolling Close click cannot
+establish that a touch exit is visible at maximum scroll.
+
+
+## Persistent exits and actual keyboard visibility — ninth UI acceptance
+
+The settings heading is outside its single scroll body. Subscription Close is
+owned by the panel heading and returns focus to its nav toggle. Preserve44px
+targets, explicit dialog width bounds, wrapping and inherited select text;
+never clip content or reduce hit areas to hide a narrow/text-size failure.
+
+The Tab boundary must exclude controls inside every closed details ancestor,
+except that ancestor's own direct summary and its children. getClientRects()
+alone is not proof of keyboard visibility: the observed browser returned a
+rectangle for hidden closed-details descendants. Open ancestors still expose
+their controls. Run canonical Node59 (all57 previous cases plus2 actual-listener
+keyboard regressions). Preserve the original clauses for disabled/hidden
+controls, Close/Escape, request ownership and focus return.
+
+Geometry is separately observed through CUA on original host HTML/synthetic
+APIs at320/390/736 CSSpx, SDK preferences and declared targeted CSS200. It is
+not physical-device or human evidence. Direct native key input avoids the
+locator's own refocus/scroll side effect when proving a terminal scroll.

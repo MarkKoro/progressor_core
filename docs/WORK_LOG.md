@@ -406,3 +406,86 @@ New gates have not been claimed complete in this source entry. A new fresh
 bounded restored pre-backup must follow them before main/update-all. The actual
 installed seventh fallback, all three readiness gates, Food delivery state and
 the sole deployment engine remain unchanged.
+
+## Closed H08 and next shared UI scope — 2026-11-04
+
+The corrected H08 package was published normally to main and installed through
+the existing update-all transaction20261104T144356Z-2449683. Current Core is
+f9dce610fc11025d6255bec1312c78cc70f5e5d4; Gym is
+b26f1e2a8bd80113bad4e85331c6b283b80296a3. Food5c18fd1d and Supply2aaa1b17
+were unchanged. Actual canonical Linux results were Core477/Gym266/Food192/
+Supply95,1030 total, plus separate compound13 and Node35. Their scopes overlap
+and are not an inflated unique-test count. Pre/post checkpoints were downloaded,
+SHA-verified and all four databases restore-tested off-server. Strict live
+verification found all nine services healthy, private SQLite3.54, exact selected
+source and retained policy E=1793803706.59017. The close receipt is
+c592859b30b626e4e93eab1bc7ae5939fe5dd31ce2ac3245ae24ebc8992f19f4.
+Those completed H08 operations are not rerun or renamed as new UI evidence.
+
+An exact-f9 whole-asset reproduction retained the original35 passing cases and
+then failed a new coach-save scenario: unrelated unsaved preferences disappeared
+when its following settings read rerendered the form. The bounded candidate
+manages the four coach/rhythm callbacks independently, captures open/render/
+request/available launch context before POST, locks only the owned row and
+preserves the latest registered preference edits when its GET completes.
+Confirmed writes remain distinct from failed subsequent reads; each request is
+bounded to eight seconds and read recovery never automatically repeats a POST.
+Close/timeout does not establish server cancellation. Generic helpers and other
+transient editors remain outside this correction.
+
+The isolated candidate passed57 actual Node cases (the original35 plus22), with
+independent source review and two additional review-only controls. The extra two
+overlap existing guards and do not turn the canonical suite into59. These are
+deterministic DOM/event/request tests, not physical-device or backend persistence
+results. The action journal binds the exact candidate, logs and review hashes.
+Further layout acceptance and this next release remain pending in this entry.
+No bot copy, backend, dependency, gate, paid provider or consumer is added.
+
+
+## Measured ninth UI candidate acceptance — 2026-11-05
+
+Browser baseline reproduced Close scrolling out of both long shared windows,
+a narrow subscription Close hit area and a wrapped Training label at320px.
+The scoped correction keeps one settings scroll body below its fixed heading,
+moves the subscription heading to the panel, restores its nav focus on Close,
+and distributes nav width by label while keeping44px targets. Measured CSS200
+overflow led to explicit dialog width bounds, proper select margin sizing/font
+inheritance and long-label/button wrapping. No clipping, smaller targets or new
+backend/provider call is used.
+
+Actual CUA geometry covered36 matched states: all three host HTMLs,320x640 /
+390x844 /736x360, dark/light SDK preferences and normal/targeted CSS200. Both
+Close controls remained visible/hittable before clicking, with no horizontal
+settings overflow and correct close/focus behavior. At normal text the nav
+labels fit one line; larger text wraps honestly. SDK preference is not proof
+of a light surface: Food/Supply/Core retain their existing dark treatment.
+
+Two Food terminal-scroll probes were affected by locator refocus/scroll, not
+reported as silent successes. Ordinary CUA key input on unchanged focus then
+gave three identical terminal values in each case. The subsequent actual Tab
+check found hidden descendants of closed details in the old boundary list.
+The final filter excludes those ancestors while retaining their own summary.
+The old asset passed all57 prior cases and failed a new reproduction; final
+Node59 passed, with the previous assertions preserved. Final native keyboard3
+and pending-save Close3 checks passed on the three hosts. These are overlapping
+route checks, not42 unique independent users or a usability statistic.
+
+The geometry source preceded only the final keyboard-filter change; its CSS
+and nav are byte-identical to the final source. Final keyboard/pending checks
+and later screenshot captures bind that small functional delta separately.
+This is an explicit composed proof, not a claim that all36 were repeated on
+the final asset. The CUA in-memory arrays were lost at an application reset
+before export; observed text results were journaled from the tool outputs,
+with that limitation retained. Three later CUA screenshots were saved as local
+artifacts; they do not replace the provenance of the earlier36 observations.
+No physical Telegram, OS text-scale, glyph-font diagnosis or Q score is claimed.
+
+Independent review checked the final JS/CJS and exact old57 assertions. Only
+Core's two canonical JS assets, existing CJS test and appended AGENTS/WORK_LOG
+notes differ from the closed H08 selected373 source; all native bot source,
+Python/dependencies/updater/mirrors/gates remain exact. Fresh Linux Core477 and
+the new bounded pre-backup/off-server restores still precede main publication
+and the existing update-all switch. Unchanged bot Python553 is reused only
+with exact source equality, never called a fresh1030 run. Live installation,
+strict checks and post-backup completion are recorded in the durable journal
+only when actually observed. Preserve current full-H08 E and fallbackf9.
