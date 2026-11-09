@@ -13,7 +13,8 @@ def candidate(store,user_id,prefs,now=None,enabled_sources=None):
     local=now.astimezone(ZoneInfo(prefs.get('timezone','Europe/Moscow')))
     # Delay through quiet hours without sending obsolete workouts in the morning.
     if not 8<=local.hour<22 or store.hints_dismissed(user_id,'food'): return None
-    c=build_context(store,user_id,now=now,target='food',enabled_sources=enabled_sources)
+    c=build_context(store,user_id,now=now,target='food',enabled_sources=enabled_sources,
+                    remember_recommendations=False)
     if not c['access']['domains']['food'] or 'food' not in c['memberships'] or c['sources'].get('food',{}).get('status')!='ok': return None
     from .weekly_plan import notification
     weekly=notification(store,user_id,prefs,now)

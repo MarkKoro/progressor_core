@@ -489,3 +489,16 @@ and the existing update-all switch. Unchanged bot Python553 is reused only
 with exact source equality, never called a fresh1030 run. Live installation,
 strict checks and post-backup completion are recorded in the durable journal
 only when actually observed. Preserve current full-H08 E and fallbackf9.
+
+## Food reminder eligibility at send time — 2026-11-09
+
+Food now asks the existing signed notification endpoint to confirm the exact
+candidate under the Food menu lock. Core calculates these candidates without
+writing recommendation metadata. Other context callers keep their existing
+behavior. The endpoint and its request format are unchanged.
+
+The previous Food implementation sent queued test reminders after Gym access
+was disabled or rest was enabled. The candidate suppressed both and used the
+refreshed text in the eligible case. The Core runtime changes passed 478
+isolated Linux tests. Release versions, Food checks and backup evidence are
+tracked in the deployment journal.

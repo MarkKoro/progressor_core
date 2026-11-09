@@ -1,6 +1,7 @@
 import json,os,sqlite3,tempfile,unittest
 from datetime import timedelta
 from pathlib import Path
+from unittest.mock import patch
 from test_integration import fixture,USER,NOW
 from progressor_core.store import Store
 from progressor_core.adapters import snapshot
@@ -71,6 +72,12 @@ class ProfilesNotifications(unittest.TestCase):
         n=self.notify();self.assertEqual(n['kind'],'post_workout');self.assertIn('1700 ккал',n['text'])
         self.assertIn('белки 80 г, жиры 70 г, углеводы 180 г',n['text'])
         self.assertIsNone(self.context()['activity']['calorie_target_adjustment'])
+    def test_notification_does_not_write_recommendation_metadata(self):
+        with patch.object(self.store,'remember',wraps=self.store.remember) as remember:
+            self.assertEqual(self.notify()['kind'],'post_workout')
+            remember.assert_not_called()
+            self.context()
+            remember.assert_called_once()
     def test_explicit_optout_recent_delay_and_old_bootstrap_skip(self):
         self.assertIsNone(self.notify({**self.prefs,'workout_enabled':False}))
         self.assertIsNone(self.notify({**self.prefs,'enabled_at':NOW.timestamp()}))

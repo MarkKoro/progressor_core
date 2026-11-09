@@ -10,7 +10,8 @@ from .connections import preferences
 from .workout_time import known_workout, TIME_COVERAGE
 
 
-def build_context(store, user_id, now=None, requested_day=None, target=None, enabled_sources=None, *, _request_data=None):
+def build_context(store, user_id, now=None, requested_day=None, target=None, enabled_sources=None, *,
+                  _request_data=None, remember_recommendations=True):
     now = now or datetime.now(timezone.utc)
     food_zone = zone('Europe/Moscow')
     day = date.fromisoformat(requested_day) if requested_day else now.astimezone(food_zone).date()
@@ -59,9 +60,10 @@ def build_context(store, user_id, now=None, requested_day=None, target=None, ena
     if reason == 'no_rule_triggered' and seven['averages_on_logged_days']['protein'] < protein_target * .8:
         reason = 'logged_protein_below_current_personal_target'
         recommendation = {'rule': 'logged_protein_vs_personal_goal.v1', 'title': 'Проверьте полноту записей питания', 'message': f"За {seven['logged_days']} записанных дней из последних 7 средний белок в журнале — {seven['averages_on_logged_days']['protein']:g} г, текущая личная цель Food — {protein_target:g} г. Проверьте, все ли приёмы пищи внесены, затем сравните журнал с вашей целью.", 'action': 'review_food_log', 'threshold_basis': 'display_rule_80_percent_of_personal_goal; not_a_medical_threshold', 'confidence': 'limited', 'uncertainty': 'Журнал может быть неполным. По этим записям нельзя установить клинический дефицит или необходимость добавки. Дозы и назначения не рассчитываются.', 'provenance': seven['provenance'] + [{'source': 'food', 'event_id': food_target['event_id'], 'basis': 'current_personal_food_goal'}], 'coverage': {'logged_days': seven['logged_days'], 'window_days': 7}, 'calculation': {'logged_protein_average_g': seven['averages_on_logged_days']['protein'], 'current_personal_target_g': protein_target, 'comparison_ratio': round(seven['averages_on_logged_days']['protein'] / protein_target, 3)}, 'rule_version': 1, 'window_start': seven['window_start'], 'window_end_exclusive': day.isoformat()}
-    rec_id = store.remember(user_id, 'logged_protein_vs_personal_goal.v1', day.isoformat(), recommendation)
-    if recommendation:
-        recommendation = {**recommendation, 'id': rec_id}
+    if remember_recommendations:
+        rec_id = store.remember(user_id, 'logged_protein_vs_personal_goal.v1', day.isoformat(), recommendation)
+        if recommendation:
+            recommendation = {**recommendation, 'id': rec_id}
     supply_entities = [e for e in entities if e['source'] == 'supply'] if source_status['supply']['status'] == 'ok' else []
     supply_context={'active_supplements':[e['payload'] for e in supply_entities if e['entity_id'].startswith('supplement:') and e['payload'].get('active')], 'recent_intakes':sorted([e['payload'] for e in supply_entities if e['entity_id'].startswith('intake:')],key=lambda p:(p['source_local_date'],p['entity_id']),reverse=True)[:90], 'lab_reports':[e['payload'] for e in supply_entities if e['entity_id'].startswith('lab:')], 'reported_profile':next((e['payload']['reported_profile'] for e in supply_entities if e['payload'].get('profile_kind')=='reported_health'),None), 'uncertainty':'Дозы в Supply записаны текстом и не складываются с оценками пищи. Анализы сохраняют исходные единицы и статус обработки; Core не устанавливает диагнозы.'}
     data={'schema_version': 1, 'generated_at': now.isoformat(), 'user_id': user_id, 'memberships': sorted(active), 'sources': source_status, 'activity': activity, 'nutrition': {'reason': reason, 'day_timezone': 'Europe/Moscow', 'targets': food_target['payload']['targets'] if food_target and source_status['food']['status'] == 'ok' else None, 'history': history if source_status['food']['status'] == 'ok' else None}, 'recommendations': [recommendation] if recommendation else [], 'supply': {**supply_context,'active_supplement_count': sum(bool(e['payload'].get('active')) for e in supply_entities if e['entity_id'].startswith('supplement:')), 'recorded_intake_count': sum(e['payload'].get('status') == 'taken' for e in supply_entities if e['entity_id'].startswith('intake:')), 'lab_report_count': sum(e['entity_id'].startswith('lab:') for e in supply_entities), 'status': source_status['supply']['status']}, 'notification_delivery': 'webapp_only','access':access}
