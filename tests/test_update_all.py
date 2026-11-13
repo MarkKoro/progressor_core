@@ -240,12 +240,54 @@ class CoordinatedUpdate(unittest.TestCase):
         stop.assert_not_called(); backup.assert_not_called()
 
     def test_noop_checks_status_without_packages_tests_or_restarts(self):
+        candidates = self.u.folder / 'candidates'
+        (candidates / 'food').mkdir(parents=True)
+        log = self.u.folder / 'check.log'
+        log.write_text('diagnostics')
         with patch.object(self.u, 'plan'), patch.object(self.u, 'health', return_value={}), \
              patch.object(self.u, 'prepare_runtimes') as packages, patch.object(self.u, 'stop_units') as stop, \
              patch.object(self.u, 'show_status') as status:
             self.u.execute()
         stop.assert_not_called(); packages.assert_not_called(); status.assert_called_once()
         self.assertEqual(self.u.state['phase'], 'already_current')
+        self.assertFalse(candidates.exists())
+        self.assertEqual(log.read_text(), 'diagnostics')
+        self.assertEqual(json.loads((self.u.folder / 'state.json').read_text())['phase'], 'already_current')
+
+    def test_successful_check_cleans_candidates_after_showing_status(self):
+        self.u.check_only = True
+        self.u.changed = {'food'}
+        candidates = self.u.folder / 'candidates'
+        candidates.mkdir()
+
+        def show_status(_report):
+            self.assertTrue(candidates.exists())
+            self.assertEqual(json.loads(up.STATE.read_text())['phase'], 'checked')
+
+        with patch.object(self.u, 'plan'), patch.object(self.u, 'health', return_value={}), \
+             patch.object(self.u, 'show_status', side_effect=show_status):
+            self.u.execute()
+        self.assertFalse(candidates.exists())
+
+    def test_failed_baseline_keeps_candidates(self):
+        candidates = self.u.folder / 'candidates'
+        candidates.mkdir()
+        with patch.object(self.u, 'plan'), patch.object(self.u, 'health', side_effect=up.UpdateError('baseline')), \
+             patch.object(self.u, 'show_status') as status:
+            with self.assertRaisesRegex(up.UpdateError, 'baseline'):
+                self.u.execute()
+        self.assertTrue(candidates.exists())
+        status.assert_not_called()
+
+    def test_candidate_cleanup_does_not_follow_symlink_or_fail_check(self):
+        candidates = self.u.folder / 'candidates'
+        candidates.symlink_to(self.new, target_is_directory=True)
+        with patch.object(self.u, 'plan'), patch.object(self.u, 'health', return_value={}), \
+             patch.object(self.u, 'show_status'):
+            self.u.execute()
+        self.assertEqual(self.u.state['phase'], 'already_current')
+        self.assertEqual((self.new / 'REVISION').read_text(), 'b' * 40)
+        up.emit.assert_any_call('Предупреждение: не удалось удалить временные исходники проверки.')
 
     def test_abort_before_switch_does_not_kill_running_paid_supply_job(self):
         self.u.state.update(affected=['supply_bot.service', 'supply_assistant_worker.service'], worker_frozen=True)

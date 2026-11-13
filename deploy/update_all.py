@@ -1014,6 +1014,12 @@ class Updater:
             if self.check_only: emit('Изменения для установки: ' + (', '.join(sorted(self.changed)) or 'нет'))
             else: emit('Обновление не требуется; перезапусков нет.')
             self.show_status(baseline)
+            try:
+                shutil.rmtree(self.folder / 'candidates')
+            except FileNotFoundError:
+                pass
+            except OSError:
+                emit('Предупреждение: не удалось удалить временные исходники проверки.')
             return
         self.prepare_runtimes()
         self.test_candidates()
