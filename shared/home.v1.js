@@ -9,7 +9,9 @@
   const icons = {
     play: 'M7 4v16l13-8z', ok: 'M5 12l5 5L20 7', down: 'M6 9l6 6 6-6', plus: 'M12 5v14M5 12h14', lock: 'M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z',
     cam: 'M5 7h3l2-3h4l2 3h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zM15.5 13a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0z',
-    mic: 'M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3', stop: 'M7 7h10v10H7z'};
+    mic: 'M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3', stop: 'M7 7h10v10H7z',
+    home: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z', gym: 'M3 12h18M6 7v10M18 7v10M3 9v6M21 9v6',
+    food: 'M5 19c0-9 5-14 15-14 0 10-5 15-14 15M5 19l7-7', supply: 'M4.5 12.5l8-8a5 5 0 0 1 7 7l-8 8a5 5 0 0 1-7-7zM8.5 8.5l7 7'};
   function h(tag, props, ...children) {
     const node = document.createElement(tag);
     for (const [key, value] of Object.entries(props || {})) {
@@ -310,11 +312,8 @@
     const known = percents.filter(Number.isFinite), index = known.length ? Math.round(known.reduce((a, b) => a + Math.min(b, 100), 0) / known.length) : null;
     const link = state.relationship
       ? h('div', {class: 'ph-link'}, h('b', null, 'Связка дня'), state.relationship)
-      : h('div', {class: 'ph-link'}, h('b', null, 'Как продукты помогают друг другу'),
-          h('ul', null, h('li', null, 'После тренировки подскажем, сколько белка добрать в ближайший приём пищи.'),
-            h('li', null, 'Запишете обед — напомним про добавки, которые принимают с едой.'),
-            h('li', null, 'В день тяжёлой тренировки покажем, хватает ли энергии по дневнику питания.')),
-          h('p', {class: 'ph-muted'}, 'Связки появятся здесь, когда в дневниках будут записи за сегодня.'));
+      : h('div', {class: 'ph-link'}, h('b', null, 'Связки появятся с первыми записями'),
+          h('ul', null, h('li', null, 'Тренировка → сколько белка добрать'), h('li', null, 'Обед → добавки, которые пьют с едой'), h('li', null, 'Тяжёлый день → хватает ли энергии')));
     body.replaceChildren(
       h('header', null, h('h1', null, name ? 'Привет, ' + name : 'Сегодня'),
         h('div', {class: 'ph-idx', role: 'img', 'aria-label': index === null ? 'Данных за сегодня пока нет' : `День выполнен на ${index} процентов`}, h('b', null, index === null ? '—' : String(index)), h('span', null, 'день'))),
@@ -326,13 +325,15 @@
     style.textContent = `
 #progressor-home{position:fixed;inset:0;z-index:30;background:#fff;color:#10131A;overflow:auto;-webkit-overflow-scrolling:touch;font:15px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 #progressor-home *{box-sizing:border-box}#progressor-home [hidden]{display:none!important}
-#progressor-home .ph-body{max-width:460px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top,0px)) 16px calc(104px + env(safe-area-inset-bottom,0px))}
-#progressor-home .ph-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(12px + env(safe-area-inset-bottom,0px));width:min(428px,calc(100% - 32px));background:#10131A;border-radius:22px;display:grid;grid-template-columns:repeat(4,1fr);padding:6px;z-index:1}
-#progressor-home .ph-bar button{border:0;background:none;color:#8C93A3;font:inherit;font-size:12px;font-weight:600;min-height:48px;border-radius:16px;cursor:pointer}
-#progressor-home .ph-bar button[aria-current]{background:#fff;color:#10131A}
+#progressor-home .ph-body{max-width:460px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top,0px)) 16px calc(88px + env(safe-area-inset-bottom,0px))}
+#progressor-home .ph-bar{position:fixed;left:0;right:0;bottom:0;background:rgba(255,255,255,.86);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);border-top:1px solid #E6E9EF;display:grid;grid-template-columns:repeat(4,1fr);padding:6px max(16px,calc(50% - 214px)) calc(6px + env(safe-area-inset-bottom,0px));z-index:1}
+#progressor-home .ph-bar button{border:0;background:none;color:#A3AAB8;min-height:48px;cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:14px;transition:color .15s,transform .12s}
+#progressor-home .ph-bar button:active{transform:scale(.9)}
+#progressor-home .ph-bar button[aria-current]{color:#10131A}
+#progressor-home .ph-bar .ph-i{width:24px;height:24px}
 #progressor-home .ph-idx{background:#10131A;color:#fff;border-radius:16px;padding:8px 14px;text-align:center;line-height:1.1;flex:none}
 #progressor-home .ph-idx b{display:block;font-size:20px}#progressor-home .ph-idx span{font-size:11px;color:#B8BECB}
-#progressor-home .ph-link ul{margin:6px 0 4px;padding-left:18px}#progressor-home .ph-link li{margin:4px 0;font-size:14px}
+#progressor-home .ph-link ul{margin:6px 0 4px;padding-left:18px}#progressor-home .ph-link li{margin:3px 0;font-size:14px}
 #progressor-home .ph-opt{display:block;width:100%;text-align:left;border:0;font:inherit;background:#F3F4F7;color:#10131A;border-radius:16px;padding:14px;margin-top:8px;cursor:pointer}
 #progressor-home .ph-opt.rec{background:#FF7A59;color:#3B1206}#progressor-home .ph-opt small{display:block;font-size:13px}
 #progressor-home header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px}
@@ -340,11 +341,12 @@
 #progressor-home h2{margin:8px 0 0;font-size:18px;font-weight:700;color:inherit}#progressor-home h3{margin:0;font-size:20px;color:inherit}
 #progressor-home p{margin:2px 0 0;font-size:13px}#progressor-home .ph-muted{color:#6B7585;font-size:13px}
 #progressor-home .ph-x{border:0;background:#F3F4F7;color:#10131A;width:44px;height:44px;border-radius:14px;font-size:22px;line-height:1;cursor:pointer;flex:none}
-#progressor-home .ph-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-#progressor-home .ph-tile{border-radius:24px;padding:16px;min-width:0}
-#progressor-home .gy{background:#FF7A59;color:#3B1206;box-shadow:0 6px 0 #E0613F}
-#progressor-home .fd{background:#5EE0A0;color:#06311C;box-shadow:0 6px 0 #3FC585}
-#progressor-home .sp{background:#6FB6FF;color:#06254A;box-shadow:0 6px 0 #4E9BEA;grid-column:span 2;display:flex;align-items:center;gap:14px;cursor:pointer}
+#progressor-home .ph-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 12px}
+#progressor-home .ph-tile{border-radius:24px;padding:16px;min-width:0;transition:transform .12s}
+#progressor-home .ph-btn{transition:transform .1s,background .1s}#progressor-home .ph-btn:active{transform:translateY(2px);background:rgba(0,0,0,.26)}
+#progressor-home .gy{background:linear-gradient(160deg,#FF8E70,#FF7A59 55%);color:#3B1206;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 6px 0 #E0613F,0 20px 28px -14px rgba(255,122,89,.75)}
+#progressor-home .fd{background:linear-gradient(160deg,#78E9B2,#5EE0A0 55%);color:#06311C;box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 6px 0 #3FC585,0 20px 28px -14px rgba(94,224,160,.8)}
+#progressor-home .sp{background:linear-gradient(160deg,#8AC4FF,#6FB6FF 55%);color:#06254A;box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 6px 0 #4E9BEA,0 20px 28px -14px rgba(111,182,255,.8);grid-column:span 2;display:flex;align-items:center;gap:14px;cursor:pointer}
 #progressor-home .sp h2{margin:0}#progressor-home .ph-grow{flex:1;min-width:0}
 #progressor-home .ph-locked{background:#F3F4F7;color:#10131A;box-shadow:0 6px 0 #E0E4EA;cursor:default;display:block}
 #progressor-home .ph-lock{width:56px;height:56px;border-radius:50%;background:#E0E4EA;display:flex;align-items:center;justify-content:center}
@@ -356,7 +358,7 @@
 #progressor-home .ph-btn{border:0;font:inherit;font-weight:600;font-size:14px;color:inherit;background:rgba(0,0,0,.16);border-radius:14px;padding:10px 12px;display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;min-height:44px}
 #progressor-home .ph-btn.grow{flex:1}#progressor-home .ph-btn.ico{width:44px;padding:0}
 #progressor-home .ph-btn.dark{background:#10131A;color:#fff}#progressor-home .ph-btn.light{background:#F3F4F7;color:#10131A}
-#progressor-home .ph-textlink{border:0;background:none;color:inherit;font:inherit;font-size:13px;text-decoration:underline;padding:10px 0 0;cursor:pointer}
+#progressor-home .ph-textlink{border:0;background:none;color:inherit;font:inherit;font-size:13px;text-decoration:underline;padding:14px 0;cursor:pointer;opacity:.75}
 #progressor-home .ph-spin{width:38px;height:38px;border-radius:50%;border:4px solid #E6E9EF;border-top-color:#3FC585;animation:ph-r .8s linear infinite;margin:26px auto}
 @keyframes ph-r{to{transform:rotate(360deg)}}@keyframes ph-w{0%,100%{height:10px}50%{height:52px}}
 #progressor-home .ph-wave{display:flex;gap:4px;align-items:center;justify-content:center;height:64px;margin:12px 0 4px}
@@ -387,7 +389,7 @@
 #progressor-home .ph-chip{border:1.5px solid #E6E9EF;background:#fff;border-radius:14px;padding:9px 12px;font:inherit;font-size:14px;cursor:pointer;color:#10131A;min-height:44px}
 #progressor-home .ph-chip.on{background:#6FB6FF;border-color:#6FB6FF;color:#06254A}
 #progressor-home .ph-mini{border:0;font:inherit;font-size:13px;font-weight:600;background:#6FB6FF;color:#06254A;border-radius:10px;padding:0 12px;min-height:44px;cursor:pointer}
-#progressor-home .ph-toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:3;background:#10131A;color:#fff;border-radius:14px;padding:11px 14px;font-size:14px;display:flex;align-items:center;gap:10px;max-width:calc(100% - 32px)}
+#progressor-home .ph-toast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:3;background:#10131A;color:#fff;border-radius:14px;padding:11px 14px;font-size:14px;display:flex;align-items:center;gap:10px;max-width:calc(100% - 32px)}
 #progressor-home .ph-toast button{border:0;background:#6FB6FF;color:#06254A;font:inherit;font-weight:600;border-radius:10px;padding:8px 10px;cursor:pointer}`;
     document.head.append(style);
     body = h('div', {class: 'ph-body'});
@@ -398,8 +400,9 @@
       const link = document.querySelector(`#progressor-shell nav a[data-domain="${domain}"]`);
       if (link) link.click(); else toast('Переход временно недоступен.');
     };
-    bar = h('nav', {class: 'ph-bar', 'aria-label': 'Разделы'}, h('button', {type: 'button', 'aria-current': 'page'}, 'Сегодня'),
-      h('button', {type: 'button', onclick: open('gym')}, 'Зал'), h('button', {type: 'button', onclick: open('food')}, 'Еда'), h('button', {type: 'button', onclick: open('supply')}, 'БАДы'));
+    bar = h('nav', {class: 'ph-bar', 'aria-label': 'Разделы'}, h('button', {type: 'button', 'aria-current': 'page', 'aria-label': 'Сегодня'}, icon('home')),
+      h('button', {type: 'button', 'aria-label': 'Тренировки', onclick: open('gym')}, icon('gym')), h('button', {type: 'button', 'aria-label': 'Еда', onclick: open('food')}, icon('food')),
+      h('button', {type: 'button', 'aria-label': 'БАДы', onclick: open('supply')}, icon('supply')));
     root = h('section', {id: 'progressor-home', 'aria-label': 'Сегодня', hidden: true}, body, bar, sheet, toastNode);
     document.body.append(root);
   }
