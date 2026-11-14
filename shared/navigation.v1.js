@@ -274,7 +274,7 @@
       body[data-progressor-domain="gym"] .app-header{top:var(--progressor-bar-height)}
       body[data-progressor-domain="supply"] #app{height:calc(100% - var(--progressor-bar-height));margin-top:var(--progressor-bar-height)}
       #progressor-shell{position:fixed;top:0;left:0;right:0;z-index:24;isolation:isolate;color:#f1f5f9;font:13px system-ui;background:#13213d;border-bottom:1px solid var(--border,#46516b);padding:calc(2px + env(safe-area-inset-top,0px)) 8px 2px;}
-      #progressor-shell nav{display:grid;grid-template-columns:minmax(44px,1.3fr) minmax(44px,.7fr) minmax(44px,.8fr) minmax(44px,1.2fr);gap:4px;max-width:900px;margin:auto;}
+      #progressor-shell nav{display:grid;grid-template-columns:minmax(44px,1fr) minmax(44px,1.3fr) minmax(44px,.7fr) minmax(44px,.8fr) minmax(44px,1.2fr);gap:4px;max-width:900px;margin:auto;}
       #progressor-shell *{font-family:inherit;box-sizing:border-box}
       #progressor-shell{box-sizing:border-box;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
       #progressor-shell a,#progressor-shell button{display:flex;align-items:center;justify-content:center;min-height:48px;border:0;border-radius:10px;color:inherit;background:transparent;text-decoration:none;cursor:pointer;font:600 12px system-ui;}
@@ -408,11 +408,14 @@
     element('strong', 'Общий контекст', panel);
     const status = element('p', 'Загрузка контекста…', panel);
     const content = element('div', undefined, panel);
+    const homeButton = element('button', 'Сегодня', nav); homeButton.type = 'button'; homeButton.dataset.progressorHome = ''; homeButton.setAttribute('aria-pressed', 'false');
+    homeButton.addEventListener('click', () => { if (window.Progressor.homeOpen?.()) window.Progressor.closeHome(); else window.Progressor.openHome?.(); });
+    document.addEventListener('progressor:home', event => homeButton.setAttribute('aria-pressed', String(!!event.detail?.open)));
     for (const [domain, label] of [['gym', 'Тренировки'], ['food', 'Еда'], ['supply', 'БАДы']]) {
       const link = element('a', label, nav); link.href = routes[domain]; link.dataset.domain = domain;
       if (domain === source) link.setAttribute('aria-current', 'page');
       link.addEventListener('click', async event => {
-        if (domain === source) { event.preventDefault(); return; }
+        if (domain === source) { event.preventDefault(); window.Progressor.closeHome?.(); return; }
         event.preventDefault();
         await bootstrap(true);
         if (sessionValid() && canNavigate() && availableDomains.includes(domain)) location.assign(routes[domain]);
@@ -499,6 +502,8 @@
       location.assign(routes[domain]+'?progressor_action='+purpose.kind);
       return true;
     }
+    window.Progressor.performAction = performAction;
+    const homeScript = document.createElement('script'); homeScript.src = '/progressor/assets/home.v1.js'; homeScript.dataset.progressorSource = source; document.head.append(homeScript);
     function renderInline() {
       const host=window.ProgressorDomain?.hintHost?.();
       if (!host) return;

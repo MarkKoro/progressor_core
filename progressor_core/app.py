@@ -181,6 +181,10 @@ def create_app(config=None):
     def navigation():
         return FileResponse(Path(__file__).resolve().parents[1] / 'shared' / 'navigation.v1.js', media_type='application/javascript')
 
+    @app.get('/assets/home.v1.js')
+    def home_asset():
+        return FileResponse(Path(__file__).resolve().parents[1] / 'shared' / 'home.v1.js', media_type='application/javascript')
+
     @app.post('/api/v1/sessions')
     async def sessions(request: Request):
         cfg = engine(request).config
