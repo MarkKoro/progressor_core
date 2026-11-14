@@ -502,3 +502,21 @@ was disabled or rest was enabled. The candidate suppressed both and used the
 refreshed text in the eligible case. The Core runtime changes passed 478
 isolated Linux tests. Release versions, Food checks and backup evidence are
 tracked in the deployment journal.
+
+## Shared home screen "Сегодня" — 2026-11-15, branch home-today (not published)
+
+Added canonical `shared/home.v1.js` (served at `/assets/home.v1.js`), a shell
+button and `window.Progressor.performAction`. The screen reads Gym `/day/today`,
+Food `/stats/today`, Supply `/today` and Core `connections/today` with each
+audience's own assertion, marks Supply intakes through the existing toggles and
+records a meal through Food's new capture endpoints. Unpaid sources are locked
+tiles. Staged rollout: `PROGRESSOR_HOME_USERS` (empty = off, ids, or `*`) sets
+`home` in the session; without it the bar and behaviour are unchanged.
+
+Evidence: macOS/Python 3.12.10, 481 of 482 tests (the remaining failure is the
+`/private/var` symlink comparison in test_update_all, present on unchanged
+main); Node59 and navigation syntax pass. Not run: Playwright suites, Linux
+`deploy/run_core_checks.py`, physical Telegram, camera and microphone. The home
+asset was exercised only against a synthetic fetch stub in a desktop browser.
+Next: publish with the list containing only the two owners, run `update-all`,
+verify on physical devices, then widen the list.
