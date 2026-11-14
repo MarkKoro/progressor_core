@@ -509,6 +509,44 @@
     void ready.then(() => bootstrap()).then(session => {
       if (!session?.home || document.querySelector('script[data-progressor-home]')) return;
       nav.dataset.home = ''; homeButton.hidden = false;
+      // One bottom tab bar for the home screen and for every product page that opted into the shared look.
+      const glyphs = {
+        home: 'M5 4h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM15 4h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM5 14h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1zM15 14h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z',
+        gym: 'M2 12h1M6 8H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2M6 7v10a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1H7a1 1 0 0 0-1 1zM9 12h6M15 7v10a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-1a1 1 0 0 0-1 1zM18 8h2a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2M22 12h-1',
+        food: 'M5 21c.5-4.5 2.5-8 7-10M9 18c6.218 0 10.5-3.288 11-12V4h-4.014c-9 0-11.986 4-12 9 0 1 0 3 2 5h3z',
+        supply: 'M4.5 12.5l8-8a4.94 4.94 0 0 1 7 7l-8 8a4.94 4.94 0 0 1-7-7M8.5 8.5l7 7'};
+      element('style', `
+        #progressor-tabbar{position:fixed;left:0;right:0;bottom:0;z-index:31;background:rgba(255,255,255,.88);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);border-top:1px solid #E6E9EF;display:grid;grid-template-columns:repeat(4,1fr);padding:6px max(16px,calc(50% - 214px)) calc(6px + env(safe-area-inset-bottom,0px));box-sizing:border-box}
+        #progressor-tabbar[hidden],html.progressor-sheet-open #progressor-tabbar{display:none}
+        #progressor-tabbar button{border:0;background:none;color:#A3AAB8;min-height:48px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .15s,transform .12s}
+        #progressor-tabbar button:active{transform:scale(.9)}
+        #progressor-tabbar button[aria-current]{color:#10131A}
+        #progressor-tabbar svg{width:26px;height:26px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+        html[data-pg-ui="2"] #progressor-shell{background:none;border:0;padding:0}
+        html[data-pg-ui="2"] #progressor-shell nav{display:none}
+        html[data-pg-ui="2"] #progressor-context,html[data-pg-ui="2"] #progressor-transfer{background:#13213d;padding:calc(8px + env(safe-area-inset-top,0px)) 12px 12px;border-radius:0 0 18px 18px}
+      `, document.head);
+      const tabbar = element('nav'); tabbar.id = 'progressor-tabbar'; tabbar.setAttribute('aria-label', 'Разделы');
+      const tabs = {};
+      for (const [id, label] of [['home', 'Сегодня'], ['gym', 'Тренировки'], ['food', 'Еда'], ['supply', 'БАДы']]) {
+        const button = element('button', undefined, tabbar); button.type = 'button'; button.setAttribute('aria-label', label); tabs[id] = button;
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+        const path = document.createElementNS(svg.namespaceURI, 'path'); path.setAttribute('d', glyphs[id]); svg.append(path); button.append(svg);
+        button.addEventListener('click', () => {
+          if (id === 'home') { if (!window.Progressor.homeOpen?.()) window.Progressor.openHome?.(); return; }
+          if (id === source) { window.Progressor.closeHome?.(); return; }
+          nav.querySelector(`a[data-domain="${id}"]`)?.click();
+        });
+      }
+      const syncTabs = () => {
+        const homeOpen = !!window.Progressor.homeOpen?.();
+        tabbar.hidden = !(homeOpen || document.documentElement.dataset.pgUi === '2');
+        for (const [id, button] of Object.entries(tabs)) { if (id === (homeOpen ? 'home' : source)) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current'); }
+        document.documentElement.style.setProperty('--progressor-tab-height', tabbar.hidden ? '0px' : '61px');
+      };
+      document.addEventListener('progressor:home', syncTabs);
+      new MutationObserver(syncTabs).observe(document.documentElement, {attributes: true, attributeFilter: ['data-pg-ui']});
+      document.body.append(tabbar); syncTabs();
       const homeScript = document.createElement('script'); homeScript.src = '/progressor/assets/home.v1.js'; homeScript.dataset.progressorSource = source; homeScript.dataset.progressorHome = ''; document.head.append(homeScript);
     }).catch(() => {});
     function renderInline() {

@@ -131,8 +131,8 @@
     const attempt = async () => {
       openSheet('food', h('h3', null, 'Считаем…'), preview || null, h('div', {class: 'ph-spin', role: 'status', 'aria-label': 'Идёт расчёт'}));
       const result = await send();
-      if (sheetKind !== 'food') { if (result.ok) void load(); return; }
-      if (result.ok && result.data?.meal) { mealSheet(result.data, preview); void load(); return; }
+      if (sheetKind !== 'food') { if (result.ok) { void load(); document.dispatchEvent(new CustomEvent('progressor:meal-recorded', {detail: {day: result.data?.day}})); } return; }
+      if (result.ok && result.data?.meal) { mealSheet(result.data, preview); void load(); document.dispatchEvent(new CustomEvent('progressor:meal-recorded', {detail: {day: result.data.day}})); return; }
       const message = result.data?.detail?.message || (result.status ? 'Не удалось посчитать. Повторите попытку.' : 'Нет связи с сервером. Запись не потеряна — повторите.');
       // The same request id is reused: if the first answer was lost, the saved meal comes back without a new charge.
       openSheet('food', h('h3', null, 'Не получилось'), h('p', {class: 'ph-muted'}, message),
@@ -156,7 +156,7 @@
           if (!result.ok) { note.textContent = 'Правка не сохранилась. Откройте дневник и проверьте запись.'; return; }
           const ratio = grams / item.grams; version = result.data.version;
           for (const key of ['kcal', 'protein', 'fat', 'carbs']) item[key] = (item[key] || 0) * ratio;
-          item.grams = grams; note.textContent = ''; draw(); void load();
+          item.grams = grams; note.textContent = ''; draw(); void load(); document.dispatchEvent(new CustomEvent('progressor:meal-recorded', {detail: {day: data.day}}));
         };
         return h('div', {class: 'ph-item'}, h('div', {class: 'ph-grow'}, item.name, h('small', null, `${Math.round(item.kcal || 0)} ккал`)),
           h('div', {class: 'ph-step'}, h('button', {type: 'button', 'aria-label': 'Меньше на 10 граммов', onclick: step(-10)}, '−'), h('span', null, `${Math.round(item.grams)} г`), h('button', {type: 'button', 'aria-label': 'Больше на 10 граммов', onclick: step(10)}, '+')));
@@ -219,18 +219,19 @@
     let last = null; try { last = localStorage.getItem(gymKey); } catch {}
     return last === 'free' ? 'free' : 'plan';
   }
-  let root = null, body = null, bar = null, sheet = null, toastNode = null, sheetKind = null, toastTimer = 0;
+  let opened = false;
+  let root = null, body = null, sheet = null, toastNode = null, sheetKind = null, toastTimer = 0;
   function toast(message, actionLabel, action) {
     toastNode.replaceChildren(h('span', null, message));
     if (actionLabel) toastNode.append(h('button', {type: 'button', onclick: () => { toastNode.hidden = true; action(); }}, actionLabel));
     toastNode.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toastNode.hidden = true; }, 6000);
   }
-  function closeSheet() { stopRecorder(true); sheet.hidden = true; sheetKind = null; sheet.replaceChildren(); }
+  function closeSheet() { stopRecorder(true); sheet.hidden = true; sheetKind = null; sheet.replaceChildren(); document.documentElement.classList.remove('progressor-sheet-open'); }
   function openSheet(kind, ...children) {
     sheetKind = kind;
     sheet.replaceChildren(h('div', {class: 'ph-sheet', role: 'dialog', 'aria-modal': 'true'},
       h('div', {class: 'ph-sheet-head'}, children[0], h('button', {type: 'button', class: 'ph-x', 'aria-label': 'Закрыть', onclick: closeSheet}, '×')), ...children.slice(1)));
-    sheet.hidden = false;
+    sheet.hidden = false; document.documentElement.classList.add('progressor-sheet-open');
   }
   function openSupplySheet() {
     const slots = supplySlots();
@@ -274,7 +275,7 @@
     return build(s.data || {});
   }
   function render() {
-    if (!root || root.hidden) return;
+    if (!root || !opened) return;
     const name = session?.user?.first_name, percents = [];
     const gym = tile('gym', 'gy', 'Зал', d => {
       const days = d.active_days || [], done = (d.completed_days || []).length;
@@ -328,11 +329,8 @@
 #progressor-home{position:fixed;inset:0;z-index:30;background:#fff;color:#10131A;overflow:auto;-webkit-overflow-scrolling:touch;font:15px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 #progressor-home *{box-sizing:border-box}#progressor-home [hidden]{display:none!important}
 #progressor-home .ph-body{max-width:460px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top,0px)) 16px calc(88px + env(safe-area-inset-bottom,0px))}
-#progressor-home .ph-bar{position:fixed;left:0;right:0;bottom:0;background:rgba(255,255,255,.86);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);border-top:1px solid #E6E9EF;display:grid;grid-template-columns:repeat(4,1fr);padding:6px max(16px,calc(50% - 214px)) calc(6px + env(safe-area-inset-bottom,0px));z-index:1}
-#progressor-home .ph-bar button{border:0;background:none;color:#A3AAB8;min-height:48px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .15s,transform .12s}
-#progressor-home .ph-bar button:active{transform:scale(.9)}
-#progressor-home .ph-bar button[aria-current]{color:#10131A}
-#progressor-home .ph-bar .ph-i{width:26px;height:26px;stroke-width:1.75}
+#progressor-home.ph-closed{background:none;pointer-events:none;overflow:visible}#progressor-home.ph-closed .ph-body{display:none}
+#progressor-home .ph-shade,#progressor-home .ph-toast{pointer-events:auto}
 #progressor-home .ph-idx{background:#10131A;color:#fff;border-radius:16px;padding:8px 14px;text-align:center;line-height:1.1;flex:none}
 #progressor-home .ph-idx b{display:block;font-size:20px}#progressor-home .ph-idx span{font-size:11px;color:#B8BECB}
 #progressor-home .ph-link ul{margin:6px 0 4px;padding-left:18px}#progressor-home .ph-link li{margin:3px 0;font-size:14px}
@@ -397,35 +395,29 @@
     body = h('div', {class: 'ph-body'});
     sheet = h('div', {class: 'ph-shade', hidden: true, onclick: e => { if (e.target === sheet) closeSheet(); }});
     toastNode = h('div', {class: 'ph-toast', role: 'status', hidden: true});
-    const open = domain => () => {
-      if (domain === source) { hide(); return; }
-      const link = document.querySelector(`#progressor-shell nav a[data-domain="${domain}"]`);
-      if (link) link.click(); else toast('Переход временно недоступен.');
-    };
-    bar = h('nav', {class: 'ph-bar', 'aria-label': 'Разделы'}, h('button', {type: 'button', 'aria-current': 'page', 'aria-label': 'Сегодня'}, icon('home')),
-      h('button', {type: 'button', 'aria-label': 'Тренировки', onclick: open('gym')}, icon('gym')), h('button', {type: 'button', 'aria-label': 'Еда', onclick: open('food')}, icon('food')),
-      h('button', {type: 'button', 'aria-label': 'БАДы', onclick: open('supply')}, icon('supply')));
-    root = h('section', {id: 'progressor-home', 'aria-label': 'Сегодня', hidden: true}, body, bar, sheet, toastNode);
+    root = h('section', {id: 'progressor-home', 'aria-label': 'Сегодня', class: 'ph-closed'}, body, sheet, toastNode);
     document.body.append(root);
   }
   function show() {
     if (!root) build();
-    root.hidden = false;
+    opened = true; root.classList.remove('ph-closed');
     try { sessionStorage.setItem(seenKey, '1'); } catch {}
     document.dispatchEvent(new CustomEvent('progressor:home', {detail: {open: true}}));
     render(); void load();
   }
   function hide() {
-    if (!root || root.hidden) return;
-    generation++; closeSheet(); toastNode.hidden = true; root.hidden = true;
+    if (!root || !opened) return;
+    generation++; closeSheet(); toastNode.hidden = true; opened = false; root.classList.add('ph-closed');
     document.dispatchEvent(new CustomEvent('progressor:home', {detail: {open: false}}));
   }
   document.addEventListener('progressor:overlay-open', hide);
-  document.addEventListener('visibilitychange', () => { if (root && !root.hidden && !document.hidden && !busy && !sheetKind) void load(); });
+  document.addEventListener('visibilitychange', () => { if (root && opened && !document.hidden && !busy && !sheetKind) void load(); });
   window.Progressor._home = true;
   window.Progressor.openHome = show;
   window.Progressor.closeHome = hide;
-  window.Progressor.homeOpen = () => !!root && !root.hidden;
+  window.Progressor.homeOpen = () => opened;
+  // The same capture sheets serve a product page while the home screen is closed.
+  window.Progressor.capture = {photo: () => { if (!root) build(); startPhoto(); }, voice: () => { if (!root) build(); return startVoice(); }, text: () => { if (!root) build(); textSheet(''); }};
   // First launch of this tab only; a cross-product arrival keeps its requested native screen.
   const params = new URLSearchParams(location.search);
   let seen = true; try { seen = sessionStorage.getItem(seenKey) === '1'; } catch {}
