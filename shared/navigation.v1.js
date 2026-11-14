@@ -69,7 +69,7 @@
   // A purpose marker selects only an existing native view. It never grants access.
   // The sole continuation record is tab-local, short-lived and bound to the launch.
   const transferKey='progressor.transfer.v1',transferTtl=10*60*1000;
-  const actionDomains={food_goal:'food',food_log:'food',open_food:'food',gym_plan:'gym',supply_plan:'supply',supply_catalog:'supply'};
+  const actionDomains={food_goal:'food',food_log:'food',open_food:'food',gym_plan:'gym',gym_today:'gym',gym_free:'gym',supply_plan:'supply',supply_catalog:'supply'};
   const returnViews={food:['today','analytics','subscription'],gym:['today','settings','library','allExercises','measurements','achievements','teams','subscription'],supply:['today','catalog','profile','achievements']};
   const arrivalParams=new URLSearchParams(location.search);
   const arrivalAction=arrivalParams.get('progressor_action'),arrivalReturn=arrivalParams.get('progressor_return');

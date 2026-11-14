@@ -34,7 +34,7 @@
   }
 
   let session = null, generation = 0, busy = false;
-  const state = {gym: {status: 'loading'}, food: {status: 'loading'}, supply: {status: 'loading'}, relationship: null};
+  const state = {gym: {status: 'loading'}, food: {status: 'loading'}, supply: {status: 'loading'}, relationship: null, gymFree: false};
   async function call(domain, path, body, options = {}) {
     const assertion = domain === 'core' ? session?.assertions?.core : session?.assertions?.[domain];
     if (typeof assertion !== 'string') return {ok: false, status: 0};
@@ -64,6 +64,7 @@
     render();
     const jobs = [
       loadDomain('gym', '/day/today').then(v => { if (mine === generation) { state.gym = v; render(); } }),
+      (allowed('gym') ? call('gym', '/all_exercises/session/current') : Promise.resolve({ok: false})).then(v => { if (mine === generation) { state.gymFree = !!(v.ok && v.data?.session_id); render(); } }),
       loadDomain('food', '/stats/today').then(v => { if (mine === generation) { state.food = v; render(); } }),
       loadDomain('supply', '/today').then(v => { if (mine === generation) { state.supply = v; render(); } }),
       call('core', '/connections/today?target=' + source).then(v => { if (mine === generation) { state.relationship = v.ok ? v.data?.relationship || null : null; render(); } })];
@@ -207,7 +208,14 @@
     photoInput.click();
   }
 
-  let root = null, body = null, sheet = null, toastNode = null, sheetKind = null, toastTimer = 0;
+  const gymKey = 'progressor.home.gym';
+  // An unfinished free session wins; otherwise the last explicit choice on this device; otherwise the plan when one exists.
+  function gymChoice(hasPlan) {
+    if (state.gymFree || !hasPlan) return 'free';
+    let last = null; try { last = localStorage.getItem(gymKey); } catch {}
+    return last === 'free' ? 'free' : 'plan';
+  }
+  let root = null, body = null, bar = null, sheet = null, toastNode = null, sheetKind = null, toastTimer = 0;
   function toast(message, actionLabel, action) {
     toastNode.replaceChildren(h('span', null, message));
     if (actionLabel) toastNode.append(h('button', {type: 'button', onclick: () => { toastNode.hidden = true; action(); }}, actionLabel));
@@ -263,17 +271,27 @@
   }
   function render() {
     if (!root || root.hidden) return;
-    const name = session?.user?.first_name;
+    const name = session?.user?.first_name, percents = [];
     const gym = tile('gym', 'gy', 'Зал', d => {
       const days = d.active_days || [], done = (d.completed_days || []).length;
       const next = days.find(x => x.day_index === d.suggested_day_index);
+      const label = next ? next.label || 'День ' + next.day_index : null, choice = gymChoice(!!label);
+      percents.push(days.length ? done / days.length * 100 : NaN);
+      const start = kind => { try { localStorage.setItem(gymKey, kind); } catch {} closeSheet(); go({kind: kind === 'free' ? 'gym_free' : 'gym_today'}); };
+      const choose = () => openSheet('gym', h('h3', null, 'Что сегодня?'),
+        h('p', {class: 'ph-muted'}, 'Кнопка «Начать» запоминает ваш последний выбор.'),
+        label ? h('button', {type: 'button', class: 'ph-opt' + (choice === 'plan' ? ' rec' : ''), onclick: () => start('plan')}, h('b', null, label), h('small', null, 'Тренировка по вашему плану')) : null,
+        h('button', {type: 'button', class: 'ph-opt' + (choice === 'free' ? ' rec' : ''), onclick: () => start('free')}, h('b', null, state.gymFree ? 'Продолжить свободную' : 'Свободная тренировка'), h('small', null, 'Добавляете упражнения по ходу')),
+        h('button', {type: 'button', class: 'ph-opt', onclick: () => { closeSheet(); go({kind: 'gym_plan'}); }}, h('b', null, label ? 'Изменить план' : 'Настроить план'), h('small', null, 'Дни и упражнения программы')));
       return h('div', {class: 'ph-tile gy'}, ring(days.length ? done / days.length * 100 : NaN), h('h2', null, 'Зал'),
-        h('p', null, next ? `${next.label || 'День ' + next.day_index} · по плану` : 'План не настроен'),
-        h('div', {class: 'ph-btns'}, h('button', {type: 'button', class: 'ph-btn grow', onclick: () => go({kind: 'gym_plan'})}, icon('play'), 'Начать')));
+        h('p', null, choice === 'free' ? (state.gymFree ? 'Свободная · уже идёт' : 'Свободная тренировка') : `${label} · по плану`),
+        h('div', {class: 'ph-btns'}, h('button', {type: 'button', class: 'ph-btn grow', onclick: () => start(choice)}, icon('play'), state.gymFree && choice === 'free' ? 'Дальше' : 'Начать'),
+          h('button', {type: 'button', class: 'ph-btn ico', 'aria-label': 'Выбрать другую тренировку', onclick: choose}, icon('down'))));
     });
     const food = tile('food', 'fd', 'Еда', d => {
       const kcal = Math.round(d.totals?.kcal || 0), goal = d.goal?.kcal ? Math.round(d.goal.kcal) : null;
       const left = d.goal?.protein ? Math.max(0, Math.round(d.goal.protein - (d.totals?.protein || 0))) : null;
+      percents.push(goal ? kcal / goal * 100 : NaN);
       return h('div', {class: 'ph-tile fd'}, ring(goal ? kcal / goal * 100 : NaN), h('h2', null, 'Еда'),
         h('p', null, goal ? `${kcal} из ${goal} ккал` + (left !== null ? ` · белка ещё ${left} г` : '') : `${kcal} ккал · цель не задана`),
         h('div', {class: 'ph-btns'}, h('button', {type: 'button', class: 'ph-btn grow', onclick: startPhoto}, icon('cam'), 'Фото'),
@@ -283,24 +301,41 @@
     const supply = tile('supply', 'sp', 'БАДы', () => {
       const slots = supplySlots(), total = slots.reduce((n, s) => n + s.units.reduce((m, u) => m + u.count, 0), 0), done = slots.reduce((n, s) => n + s.units.reduce((m, u) => m + u.done, 0), 0);
       const next = slots.find(s => s.units.some(u => u.pending)), pending = next ? next.units.filter(u => u.pending) : [];
+      percents.push(total ? done / total * 100 : NaN);
       const text = !total ? 'На сегодня приёмов нет' : next ? `${next.title} · ${pending.length} шт · принято ${done} из ${total}` : `Все ${total} отмечены`;
       return h('div', {class: 'ph-tile sp', role: 'button', tabindex: '0', onclick: openSupplySheet, onkeydown: e => { if (e.key === 'Enter') openSupplySheet(); }},
         ring(total ? done / total * 100 : NaN), h('div', {class: 'ph-grow'}, h('h2', null, 'БАДы'), h('p', null, text)),
         next ? h('button', {type: 'button', class: 'ph-btn', onclick: e => { e.stopPropagation(); takeUnits(pending, next.title); }}, icon('ok'), 'Принял') : null);
     });
+    const known = percents.filter(Number.isFinite), index = known.length ? Math.round(known.reduce((a, b) => a + Math.min(b, 100), 0) / known.length) : null;
+    const link = state.relationship
+      ? h('div', {class: 'ph-link'}, h('b', null, 'Связка дня'), state.relationship)
+      : h('div', {class: 'ph-link'}, h('b', null, 'Как продукты помогают друг другу'),
+          h('ul', null, h('li', null, 'После тренировки подскажем, сколько белка добрать в ближайший приём пищи.'),
+            h('li', null, 'Запишете обед — напомним про добавки, которые принимают с едой.'),
+            h('li', null, 'В день тяжёлой тренировки покажем, хватает ли энергии по дневнику питания.')),
+          h('p', {class: 'ph-muted'}, 'Связки появятся здесь, когда в дневниках будут записи за сегодня.'));
     body.replaceChildren(
-      h('header', null, h('div', null, h('div', {class: 'ph-muted'}, new Date().toLocaleDateString('ru-RU', {weekday: 'long', day: 'numeric', month: 'long'})), h('h1', null, name ? 'Привет, ' + name : 'Сегодня')),
-        h('button', {type: 'button', class: 'ph-x', 'aria-label': 'Закрыть экран «Сегодня»', onclick: hide}, '×')),
-      h('div', {class: 'ph-grid'}, gym, food, supply),
-      state.relationship ? h('div', {class: 'ph-link'}, h('b', null, 'Связка дня'), state.relationship) : null);
+      h('header', null, h('h1', null, name ? 'Привет, ' + name : 'Сегодня'),
+        h('div', {class: 'ph-idx', role: 'img', 'aria-label': index === null ? 'Данных за сегодня пока нет' : `День выполнен на ${index} процентов`}, h('b', null, index === null ? '—' : String(index)), h('span', null, 'день'))),
+      h('div', {class: 'ph-grid'}, gym, food, supply), link,
+      h('button', {type: 'button', class: 'ph-textlink', onclick: () => { hide(); window.Progressor.openSubscriptions?.(); }}, 'Подписки'));
   }
   function build() {
     const style = h('style');
     style.textContent = `
-#progressor-home{position:fixed;inset:var(--progressor-bar-height,48px) 0 0 0;z-index:23;background:#fff;color:#10131A;overflow:auto;-webkit-overflow-scrolling:touch;font:15px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+#progressor-home{position:fixed;inset:0;z-index:30;background:#fff;color:#10131A;overflow:auto;-webkit-overflow-scrolling:touch;font:15px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 #progressor-home *{box-sizing:border-box}#progressor-home [hidden]{display:none!important}
-#progressor-home .ph-body{max-width:460px;margin:0 auto;padding:18px 16px 40px}
-#progressor-home header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:12px}
+#progressor-home .ph-body{max-width:460px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top,0px)) 16px calc(104px + env(safe-area-inset-bottom,0px))}
+#progressor-home .ph-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(12px + env(safe-area-inset-bottom,0px));width:min(428px,calc(100% - 32px));background:#10131A;border-radius:22px;display:grid;grid-template-columns:repeat(4,1fr);padding:6px;z-index:1}
+#progressor-home .ph-bar button{border:0;background:none;color:#8C93A3;font:inherit;font-size:12px;font-weight:600;min-height:48px;border-radius:16px;cursor:pointer}
+#progressor-home .ph-bar button[aria-current]{background:#fff;color:#10131A}
+#progressor-home .ph-idx{background:#10131A;color:#fff;border-radius:16px;padding:8px 14px;text-align:center;line-height:1.1;flex:none}
+#progressor-home .ph-idx b{display:block;font-size:20px}#progressor-home .ph-idx span{font-size:11px;color:#B8BECB}
+#progressor-home .ph-link ul{margin:6px 0 4px;padding-left:18px}#progressor-home .ph-link li{margin:4px 0;font-size:14px}
+#progressor-home .ph-opt{display:block;width:100%;text-align:left;border:0;font:inherit;background:#F3F4F7;color:#10131A;border-radius:16px;padding:14px;margin-top:8px;cursor:pointer}
+#progressor-home .ph-opt.rec{background:#FF7A59;color:#3B1206}#progressor-home .ph-opt small{display:block;font-size:13px}
+#progressor-home header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px}
 #progressor-home h1{font-size:24px;margin:0;font-weight:700;letter-spacing:-.4px;color:inherit}
 #progressor-home h2{margin:8px 0 0;font-size:18px;font-weight:700;color:inherit}#progressor-home h3{margin:0;font-size:20px;color:inherit}
 #progressor-home p{margin:2px 0 0;font-size:13px}#progressor-home .ph-muted{color:#6B7585;font-size:13px}
@@ -342,7 +377,7 @@
 #progressor-home .ph-i{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
 #progressor-home .ph-link{background:#F3F4F7;border-radius:20px;padding:14px 16px;margin-top:20px}
 #progressor-home .ph-link b{display:block;font-size:13px;color:#6B7585;font-weight:600;margin-bottom:2px}
-#progressor-home .ph-shade{position:fixed;inset:0;z-index:25;background:rgba(10,12,18,.45);display:flex;align-items:flex-end;justify-content:center}
+#progressor-home .ph-shade{position:fixed;inset:0;z-index:2;background:rgba(10,12,18,.45);display:flex;align-items:flex-end;justify-content:center}
 #progressor-home .ph-sheet{background:#fff;width:100%;max-width:460px;border-radius:26px 26px 0 0;padding:16px 16px calc(26px + env(safe-area-inset-bottom,0px));max-height:86vh;overflow:auto}
 #progressor-home .ph-sheet-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:4px}
 #progressor-home .ph-slot{margin-top:14px}
@@ -352,13 +387,20 @@
 #progressor-home .ph-chip{border:1.5px solid #E6E9EF;background:#fff;border-radius:14px;padding:9px 12px;font:inherit;font-size:14px;cursor:pointer;color:#10131A;min-height:44px}
 #progressor-home .ph-chip.on{background:#6FB6FF;border-color:#6FB6FF;color:#06254A}
 #progressor-home .ph-mini{border:0;font:inherit;font-size:13px;font-weight:600;background:#6FB6FF;color:#06254A;border-radius:10px;padding:0 12px;min-height:44px;cursor:pointer}
-#progressor-home .ph-toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:26;background:#10131A;color:#fff;border-radius:14px;padding:11px 14px;font-size:14px;display:flex;align-items:center;gap:10px;max-width:calc(100% - 32px)}
+#progressor-home .ph-toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:3;background:#10131A;color:#fff;border-radius:14px;padding:11px 14px;font-size:14px;display:flex;align-items:center;gap:10px;max-width:calc(100% - 32px)}
 #progressor-home .ph-toast button{border:0;background:#6FB6FF;color:#06254A;font:inherit;font-weight:600;border-radius:10px;padding:8px 10px;cursor:pointer}`;
     document.head.append(style);
     body = h('div', {class: 'ph-body'});
     sheet = h('div', {class: 'ph-shade', hidden: true, onclick: e => { if (e.target === sheet) closeSheet(); }});
     toastNode = h('div', {class: 'ph-toast', role: 'status', hidden: true});
-    root = h('section', {id: 'progressor-home', 'aria-label': 'Сегодня', hidden: true}, body, sheet, toastNode);
+    const open = domain => () => {
+      if (domain === source) { hide(); return; }
+      const link = document.querySelector(`#progressor-shell nav a[data-domain="${domain}"]`);
+      if (link) link.click(); else toast('Переход временно недоступен.');
+    };
+    bar = h('nav', {class: 'ph-bar', 'aria-label': 'Разделы'}, h('button', {type: 'button', 'aria-current': 'page'}, 'Сегодня'),
+      h('button', {type: 'button', onclick: open('gym')}, 'Зал'), h('button', {type: 'button', onclick: open('food')}, 'Еда'), h('button', {type: 'button', onclick: open('supply')}, 'БАДы'));
+    root = h('section', {id: 'progressor-home', 'aria-label': 'Сегодня', hidden: true}, body, bar, sheet, toastNode);
     document.body.append(root);
   }
   function show() {
