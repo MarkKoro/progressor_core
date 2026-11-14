@@ -279,6 +279,16 @@ class Integration(unittest.TestCase):
                 self.assertEqual(verify(tokens['food'],'food',KEY)['sub'],str(USER))
                 self.assertEqual(client.get('/api/v1/me/context',headers={'X-Progressor-Auth':tokens['gym']}).status_code,401)
 
+    def test_home_screen_rollout_is_off_by_default_and_limited_to_listed_owners(self):
+        import dataclasses
+        cases = [((), False, False), ((str(USER),), True, False), (('*',), True, True)]
+        for listed, owner, other in cases:
+            with TestClient(create_app(dataclasses.replace(self.config, home_users=listed))) as client:
+                for user, expected in ((USER, owner), (OTHER, other)):
+                    body = client.post('/api/v1/sessions',json={'source':'food','init_data':launch(user=user,source='food')}).json()
+                    self.assertIs(body['home'], expected, (listed, user))
+                self.assertEqual(client.get('/assets/home.v1.js').status_code, 200)
+
     def test_launch_signature_tampering_duplicate_expiration(self):
         for raw in (launch()+'&user=%7B%22id%22%3A1%7D',launch().replace('synthetic-launch','tampered'),launch(auth_date=1)):
             with self.assertRaises((ValueError,KeyError)): telegram_user(raw,TOKENS['gym'])

@@ -50,11 +50,14 @@ class Config:
     yookassa_vat: int = 1
     require_fresh_snapshots: bool = False
     bundle_upgrade_gate: str | None = None
+    # Staged rollout of the shared home screen: () is off, ('*',) is everyone, else Telegram ids.
+    home_users: tuple = ()
 
     @classmethod
     def environment(cls):
         enabled = tuple(s for s in os.environ.get('PROGRESSOR_ENABLED_DOMAINS', '').split(',') if s in SOURCES)
-        return cls(db_path=os.environ['PROGRESSOR_DB_PATH'], signing_key=Path(os.environ['PROGRESSOR_SIGNING_KEY_FILE']).read_text().strip(), source_paths={s: os.environ['PROGRESSOR_' + s.upper() + '_DB_RO'] for s in SOURCES if os.environ.get('PROGRESSOR_' + s.upper() + '_DB_RO')}, bot_tokens={s: os.environ.get('PROGRESSOR_' + s.upper() + '_BOT_TOKEN', '') for s in SOURCES}, ingest_keys={s: os.environ.get('PROGRESSOR_' + s.upper() + '_INGEST_KEY', '') for s in SOURCES}, enabled_domains=enabled,yookassa_shop=os.getenv('PROGRESSOR_YOOKASSA_SHOP_ID',''),yookassa_key=os.getenv('PROGRESSOR_YOOKASSA_SECRET_KEY',''),yookassa_vat=int(os.getenv('PROGRESSOR_YOOKASSA_VAT_CODE','1')),require_fresh_snapshots=os.getenv('PROGRESSOR_REQUIRE_FRESH_SNAPSHOTS','0')=='1',bundle_upgrade_gate='/var/lib/progressor/bundle-v2-ready')
+        home = tuple(v.strip() for v in os.environ.get('PROGRESSOR_HOME_USERS', '').split(',') if v.strip() == '*' or v.strip().isdecimal())
+        return cls(home_users=home, db_path=os.environ['PROGRESSOR_DB_PATH'], signing_key=Path(os.environ['PROGRESSOR_SIGNING_KEY_FILE']).read_text().strip(), source_paths={s: os.environ['PROGRESSOR_' + s.upper() + '_DB_RO'] for s in SOURCES if os.environ.get('PROGRESSOR_' + s.upper() + '_DB_RO')}, bot_tokens={s: os.environ.get('PROGRESSOR_' + s.upper() + '_BOT_TOKEN', '') for s in SOURCES}, ingest_keys={s: os.environ.get('PROGRESSOR_' + s.upper() + '_INGEST_KEY', '') for s in SOURCES}, enabled_domains=enabled,yookassa_shop=os.getenv('PROGRESSOR_YOOKASSA_SHOP_ID',''),yookassa_key=os.getenv('PROGRESSOR_YOOKASSA_SECRET_KEY',''),yookassa_vat=int(os.getenv('PROGRESSOR_YOOKASSA_VAT_CODE','1')),require_fresh_snapshots=os.getenv('PROGRESSOR_REQUIRE_FRESH_SNAPSHOTS','0')=='1',bundle_upgrade_gate='/var/lib/progressor/bundle-v2-ready')
 
 
 class Engine:
@@ -211,7 +214,8 @@ def create_app(config=None):
             raise HTTPException(401, 'Invalid or expired Telegram launch')
         assertions = {aud: sign_assertion(user, auth_date, aud, cfg.signing_key) for aud in AUDIENCES}
         access=await run_in_threadpool(entitlements,engine(request).store,str(user['id']))
-        return {'schema_version': 1, 'user': user, 'assertions': assertions, 'expires_at': min(int(time.time()) + 900, auth_date + 86400), 'enabled_domains': cfg.enabled_domains,'access':access}
+        return {'schema_version': 1, 'user': user, 'assertions': assertions, 'expires_at': min(int(time.time()) + 900, auth_date + 86400), 'enabled_domains': cfg.enabled_domains,'access':access,
+                'home': '*' in cfg.home_users or str(user['id']) in cfg.home_users}
 
     @app.get('/api/v1/me/context')
     def context(request: Request, day: str | None = None, target: str | None = None):
