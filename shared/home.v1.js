@@ -40,6 +40,8 @@
   let session = null, generation = 0, busy = false;
   const state = {gym: {status: 'loading'}, food: {status: 'loading'}, supply: {status: 'loading'}, relationship: null, gymFree: false};
   async function call(domain, path, body, options = {}) {
+    // A product page can use the capture sheets before the home screen was ever opened.
+    if (!session) session = await window.Progressor.renew();
     const assertion = domain === 'core' ? session?.assertions?.core : session?.assertions?.[domain];
     if (typeof assertion !== 'string') return {ok: false, status: 0};
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), options.timeout || 8000);
@@ -164,9 +166,26 @@
       totals.replaceChildren(...[['kcal', 'ккал'], ['protein', 'белки'], ['fat', 'жиры'], ['carbs', 'углев.']].map(([key, label]) => h('div', null, h('b', null, String(sum(key))), h('span', null, label))));
     };
     draw();
+    // Food → Supply: an intake that is due around this meal, or already overdue, can be marked right here.
+    const supplyRow = h('div', {class: 'ph-pair', hidden: true});
+    if (allowed('supply')) void loadDomain('supply', '/today').then(result => {
+      if (result.status !== 'ready' || sheetKind !== 'food') return;
+      state.supply = result;
+      const now = new Date(), minutes = now.getHours() * 60 + now.getMinutes();
+      const due = supplySlots().find(slot => { const m = /^(\d\d):(\d\d)$/.exec(slot.time || ''); return slot.units.some(u => u.pending) && m && Number(m[1]) * 60 + Number(m[2]) <= minutes + 90; });
+      if (!due) return;
+      const pending = due.units.filter(u => u.pending);
+      const button = h('button', {type: 'button', class: 'ph-mini', onclick: async () => {
+        button.disabled = true;
+        const ok = await setUnits(pending, 'taken');
+        supplyRow.replaceChildren(h('span', null, ok ? `БАДы «${due.title}» отмечены` : 'Не все отметки сохранились — проверьте в разделе БАДов'));
+      }}, 'Принял');
+      supplyRow.replaceChildren(h('span', null, h('b', null, `БАДы «${due.title}»`), ` · не отмечено ${pending.length}`), button);
+      supplyRow.hidden = false;
+    });
     openSheet('food', h('h3', null, data.created ? 'Записано' : 'Уже записано'),
       data.transcript ? h('p', {class: 'ph-heard'}, '«' + data.transcript + '»') : preview || null,
-      h('p', {class: 'ph-muted'}, 'Это оценка. Поправьте граммы, если порция была другой.'), list, totals, note,
+      h('p', {class: 'ph-muted'}, 'Это оценка. Поправьте граммы, если порция была другой.'), list, totals, note, supplyRow,
       h('div', {class: 'ph-btns'}, h('button', {type: 'button', class: 'ph-btn dark grow', onclick: closeSheet}, 'Готово')));
   }
   function textSheet(initial) {
@@ -372,6 +391,7 @@
 #progressor-home .ph-step{display:flex;align-items:center;gap:4px}
 #progressor-home .ph-step button{width:44px;height:44px;border-radius:12px;border:0;background:#F3F4F7;color:#10131A;font-size:20px;cursor:pointer}
 #progressor-home .ph-step span{min-width:54px;text-align:center;font-weight:600}
+#progressor-home .ph-pair{display:flex;justify-content:space-between;align-items:center;gap:10px;background:#DEEBFF;color:#06254A;border-radius:16px;padding:10px 12px;margin-top:10px;font-size:14px}
 #progressor-home .ph-tot{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0 4px;text-align:center}
 #progressor-home .ph-tot div{background:#5EE0A0;color:#06311C;border-radius:14px;padding:8px 4px}
 #progressor-home .ph-tot b{display:block;font-size:17px}#progressor-home .ph-tot span{font-size:11px}
