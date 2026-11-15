@@ -38,7 +38,7 @@
   }
 
   let session = null, generation = 0, busy = false;
-  const state = {gym: {status: 'loading'}, food: {status: 'loading'}, supply: {status: 'loading'}, relationship: null, gymFree: false};
+  const state = {gym: {status: 'loading'}, food: {status: 'loading'}, supply: {status: 'loading'}, relationship: null, gymFree: false, gymHint: null};
   async function call(domain, path, body, options = {}) {
     // A product page can use the capture sheets before the home screen was ever opened.
     if (!session) session = await window.Progressor.renew();
@@ -71,6 +71,7 @@
     const jobs = [
       loadDomain('gym', '/day/today').then(v => { if (mine === generation) { state.gym = v; render(); } }),
       (allowed('gym') ? call('gym', '/all_exercises/session/current') : Promise.resolve({ok: false})).then(v => { if (mine === generation) { state.gymFree = !!(v.ok && v.data?.session_id); render(); } }),
+      (allowed('gym') ? call('gym', '/day/start_hint') : Promise.resolve({ok: false})).then(v => { if (mine === generation) { state.gymHint = v.ok ? v.data : null; render(); } }),
       loadDomain('food', '/stats/today').then(v => { if (mine === generation) { state.food = v; render(); } }),
       loadDomain('supply', '/today').then(v => { if (mine === generation) { state.supply = v; render(); } }),
       call('core', '/connections/today?target=' + source).then(v => { if (mine === generation) { state.relationship = v.ok ? v.data?.relationship || null : null; render(); } })];
@@ -81,7 +82,7 @@
   function supplySlots() {
     return (state.supply.data?.slots || []).map(slot => {
       const units = [];
-      for (const c of slot.complexes || []) units.push({kind: 'complex', id: c.complex_id, name: c.name, taken: c.status === 'taken', pending: c.status !== 'taken', count: c.total_count || 1, done: c.taken_count || 0});
+      for (const c of slot.complexes || []) units.push({kind: 'complex', id: c.complex_id, name: c.name, taken: c.status === 'taken', pending: c.status !== 'taken' && c.status !== 'skipped', count: c.total_count || 1, done: c.taken_count || 0});
       for (const i of slot.items || []) if (!i.blocked) units.push({kind: 'item', id: i.supplement_id, name: i.name, taken: i.status === 'taken', pending: i.status === 'none', count: 1, done: i.status === 'taken' ? 1 : 0});
       return {title: slot.title, time: slot.time_local, units};
     }).filter(slot => slot.units.length);
@@ -232,13 +233,16 @@
   }
 
   const gymKey = 'progressor.home.gym';
-  // An unfinished free session wins; otherwise the last explicit choice on this device; otherwise the plan when one exists.
+  // An unfinished free session wins; then what the person actually records (server history of
+  // recent sessions with sets); with too little history, the last choice on this device; else the plan.
   function gymChoice(hasPlan) {
     if (state.gymFree || !hasPlan) return 'free';
+    const hint = state.gymHint;
+    if (hint && hint.sample >= 3 && (hint.preferred === 'free' || hint.preferred === 'plan')) return hint.preferred;
     let last = null; try { last = localStorage.getItem(gymKey); } catch {}
     return last === 'free' ? 'free' : 'plan';
   }
-  let opened = false;
+  let opened = false, painted = false;
   let root = null, body = null, sheet = null, toastNode = null, sheetKind = null, toastTimer = 0;
   function toast(message, actionLabel, action) {
     toastNode.replaceChildren(h('span', null, message));
@@ -266,6 +270,14 @@
             onclick: async () => { if (!await setUnits([u], u.taken ? 'none' : 'taken')) toast('Не удалось сохранить отметку. Список обновлён.'); }},
             u.name, u.kind === 'complex' ? h('small', null, ` ${u.done}/${u.count}`) : null))));
       }));
+  }
+  const themeNames = {classic: 'Классика', sand: 'Песок', graphite: 'Графит', ocean: 'Океан', forest: 'Лес'};
+  function openThemes() {
+    const current = window.Progressor.theme?.() || 'classic';
+    openSheet('themes', h('h3', null, 'Оформление'),
+      h('p', {class: 'ph-muted'}, 'Одна тема на все три раздела. Светлый или тёмный вариант выбирается по теме Telegram.'),
+      h('div', {class: 'ph-themes'}, ...(window.Progressor.themes || ['classic']).map(name => h('button', {type: 'button', class: 'ph-theme', 'data-theme-name': name, 'aria-pressed': String(name === current),
+        onclick: () => { window.Progressor.setTheme?.(name); openThemes(); }}, h('i', {'aria-hidden': 'true'}), themeNames[name] || name))));
   }
   async function takeUnits(units, title) {
     if (!units.length) return;
@@ -303,7 +315,7 @@
       percents.push(days.length ? done / days.length * 100 : NaN);
       const start = kind => { try { localStorage.setItem(gymKey, kind); } catch {} closeSheet(); go({kind: kind === 'free' ? 'gym_free' : 'gym_today'}); };
       const choose = () => openSheet('gym', h('h3', null, 'Что сегодня?'),
-        h('p', {class: 'ph-muted'}, 'Кнопка «Начать» запоминает ваш последний выбор.'),
+        h('p', {class: 'ph-muted'}, state.gymHint?.sample >= 3 ? `Кнопка «Начать» выбирает то, что вы записываете чаще: по плану — ${state.gymHint.plan_sessions}, свободных — ${state.gymHint.free_sessions} из последних ${state.gymHint.sample}.` : 'Кнопка «Начать» запоминает ваш последний выбор, пока тренировок мало.'),
         label ? h('button', {type: 'button', class: 'ph-opt' + (choice === 'plan' ? ' rec' : ''), onclick: () => start('plan')}, h('b', null, label), h('small', null, 'Тренировка по вашему плану')) : null,
         h('button', {type: 'button', class: 'ph-opt' + (choice === 'free' ? ' rec' : ''), onclick: () => start('free')}, h('b', null, state.gymFree ? 'Продолжить свободную' : 'Свободная тренировка'), h('small', null, 'Добавляете упражнения по ходу')),
         h('button', {type: 'button', class: 'ph-opt', onclick: () => { closeSheet(); go({kind: 'gym_plan'}); }}, h('b', null, label ? 'Изменить план' : 'Настроить план'), h('small', null, 'Дни и упражнения программы')));
@@ -336,39 +348,46 @@
       ? h('div', {class: 'ph-link'}, h('b', null, 'Связка дня'), state.relationship)
       : h('div', {class: 'ph-link'}, h('b', null, 'Связки появятся с первыми записями'),
           h('ul', null, h('li', null, 'Тренировка → сколько белка добрать'), h('li', null, 'Обед → добавки, которые пьют с едой'), h('li', null, 'Тяжёлый день → хватает ли энергии')));
+    body.classList.toggle('ph-settled', painted); painted = true;
     body.replaceChildren(
       h('header', null, h('h1', null, name ? 'Привет, ' + name : 'Сегодня'),
         h('div', {class: 'ph-idx', role: 'img', 'aria-label': index === null ? 'Данных за сегодня пока нет' : `День выполнен на ${index} процентов`}, h('b', null, index === null ? '—' : String(index)), h('span', null, 'день'))),
       h('div', {class: 'ph-grid'}, gym, food, supply), link,
-      h('button', {type: 'button', class: 'ph-textlink', onclick: () => { hide(); window.Progressor.openSubscriptions?.(); }}, 'Подписки'));
+      h('div', {class: 'ph-foot'}, h('button', {type: 'button', class: 'ph-textlink', onclick: openThemes}, 'Оформление'),
+        h('button', {type: 'button', class: 'ph-textlink', onclick: () => { hide(); window.Progressor.openSubscriptions?.(); }}, 'Подписки')));
   }
   function build() {
     const style = h('style');
     style.textContent = `
-#progressor-home{position:fixed;inset:0;z-index:30;background:#fff;color:#10131A;overflow:auto;-webkit-overflow-scrolling:touch;font:15px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+#progressor-home{position:fixed;inset:0;z-index:30;background:var(--pg-bg,#fff);color:var(--pg-text,#10131A);overflow:auto;-webkit-overflow-scrolling:touch;font:15px/1.35 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 #progressor-home *{box-sizing:border-box}#progressor-home [hidden]{display:none!important}
 #progressor-home .ph-body{max-width:460px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top,0px)) 16px calc(88px + env(safe-area-inset-bottom,0px))}
 #progressor-home.ph-closed{background:none;pointer-events:none;overflow:visible}#progressor-home.ph-closed .ph-body{display:none}
 #progressor-home .ph-shade,#progressor-home .ph-toast{pointer-events:auto}
-#progressor-home .ph-idx{background:#10131A;color:#fff;border-radius:16px;padding:8px 14px;text-align:center;line-height:1.1;flex:none}
-#progressor-home .ph-idx b{display:block;font-size:20px}#progressor-home .ph-idx span{font-size:11px;color:#B8BECB}
+#progressor-home .ph-idx{background:var(--pg-ink,#10131A);color:var(--pg-on-ink,#fff);border-radius:16px;padding:8px 14px;text-align:center;line-height:1.1;flex:none}
+#progressor-home .ph-idx b{display:block;font-size:20px}#progressor-home .ph-idx span{font-size:11px;opacity:.72}
 #progressor-home .ph-link ul{margin:6px 0 4px;padding-left:18px}#progressor-home .ph-link li{margin:3px 0;font-size:14px}
-#progressor-home .ph-opt{display:block;width:100%;text-align:left;border:0;font:inherit;background:#F3F4F7;color:#10131A;border-radius:16px;padding:14px;margin-top:8px;cursor:pointer}
+#progressor-home .ph-opt{display:block;width:100%;text-align:left;border:0;font:inherit;background:var(--pg-surface,#F3F4F7);color:var(--pg-text,#10131A);border-radius:16px;padding:14px;margin-top:8px;cursor:pointer}
 #progressor-home .ph-opt.rec{background:#FF7A59;color:#3B1206}#progressor-home .ph-opt small{display:block;font-size:13px}
 #progressor-home header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px}
 #progressor-home h1{font-size:24px;margin:0;font-weight:700;letter-spacing:-.4px;color:inherit}
 #progressor-home h2{margin:8px 0 0;font-size:18px;font-weight:700;color:inherit}#progressor-home h3{margin:0;font-size:20px;color:inherit}
-#progressor-home p{margin:2px 0 0;font-size:13px}#progressor-home .ph-muted{color:#6B7585;font-size:13px}
-#progressor-home .ph-x{border:0;background:#F3F4F7;color:#10131A;width:44px;height:44px;border-radius:14px;font-size:22px;line-height:1;cursor:pointer;flex:none}
+#progressor-home p{margin:2px 0 0;font-size:13px}#progressor-home .ph-muted{color:var(--pg-muted,#6B7585);font-size:13px}
+#progressor-home .ph-x{border:0;background:var(--pg-surface,#F3F4F7);color:var(--pg-text,#10131A);width:44px;height:44px;border-radius:14px;font-size:22px;line-height:1;cursor:pointer;flex:none}
 #progressor-home .ph-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 12px}
-#progressor-home .ph-tile{border-radius:24px;padding:16px;min-width:0;transition:transform .12s}
+#progressor-home .ph-tile{border-radius:24px;padding:16px;min-width:0;transform-style:preserve-3d;will-change:transform;animation:ph-rise .5s cubic-bezier(.2,.8,.2,1) both}
+#progressor-home .ph-tile:nth-child(2){animation-delay:.06s}#progressor-home .ph-tile:nth-child(3){animation-delay:.12s}
+#progressor-home .ph-tile .ph-ring,#progressor-home .ph-tile .ph-btns,#progressor-home .ph-tile>.ph-btn{transform:translateZ(18px)}
+#progressor-home .ph-settled .ph-tile{animation:none}
+@keyframes ph-rise{from{opacity:0;transform:perspective(700px) rotateX(14deg) translateY(18px)}}
+@media(prefers-reduced-motion:reduce){#progressor-home .ph-tile{animation:none}}
 #progressor-home .ph-btn{transition:transform .1s,background .1s}#progressor-home .ph-btn:active{transform:translateY(2px);background:rgba(0,0,0,.26)}
 #progressor-home .gy{background:linear-gradient(160deg,#FF8E70,#FF7A59 55%);color:#3B1206;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 6px 0 #E0613F,0 20px 28px -14px rgba(255,122,89,.75)}
 #progressor-home .fd{background:linear-gradient(160deg,#78E9B2,#5EE0A0 55%);color:#06311C;box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 6px 0 #3FC585,0 20px 28px -14px rgba(94,224,160,.8)}
 #progressor-home .sp{background:linear-gradient(160deg,#8AC4FF,#6FB6FF 55%);color:#06254A;box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 6px 0 #4E9BEA,0 20px 28px -14px rgba(111,182,255,.8);grid-column:span 2;display:flex;align-items:center;gap:14px;cursor:pointer}
 #progressor-home .sp h2{margin:0}#progressor-home .ph-grow{flex:1;min-width:0}
-#progressor-home .ph-locked{background:#F3F4F7;color:#10131A;box-shadow:0 6px 0 #E0E4EA;cursor:default;display:block}
-#progressor-home .ph-lock{width:56px;height:56px;border-radius:50%;background:#E0E4EA;display:flex;align-items:center;justify-content:center}
+#progressor-home .ph-locked{background:var(--pg-surface,#F3F4F7);color:var(--pg-text,#10131A);box-shadow:0 6px 0 var(--pg-line,#E0E4EA);cursor:default;display:block}
+#progressor-home .ph-lock{width:56px;height:56px;border-radius:50%;background:var(--pg-line,#E0E4EA);display:flex;align-items:center;justify-content:center}
 #progressor-home .ph-ring svg{display:block;width:56px;height:56px}
 #progressor-home .ph-ring circle{fill:none;stroke:currentColor;stroke-width:7;stroke-linecap:round}
 #progressor-home .ph-ring .ph-track{opacity:.22}
@@ -376,40 +395,50 @@
 #progressor-home .ph-btns{display:flex;gap:6px;margin-top:12px}
 #progressor-home .ph-btn{border:0;font:inherit;font-weight:600;font-size:14px;color:inherit;background:rgba(0,0,0,.16);border-radius:14px;padding:10px 12px;display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;min-height:44px}
 #progressor-home .ph-btn.grow{flex:1}#progressor-home .ph-btn.ico{width:44px;padding:0}
-#progressor-home .ph-btn.dark{background:#10131A;color:#fff}#progressor-home .ph-btn.light{background:#F3F4F7;color:#10131A}
+#progressor-home .ph-btn.dark{background:var(--pg-ink,#10131A);color:var(--pg-on-ink,#fff)}#progressor-home .ph-btn.light{background:var(--pg-surface,#F3F4F7);color:var(--pg-text,#10131A)}
 #progressor-home .ph-textlink{border:0;background:none;color:inherit;font:inherit;font-size:13px;text-decoration:underline;padding:14px 0;cursor:pointer;opacity:.75}
-#progressor-home .ph-spin{width:38px;height:38px;border-radius:50%;border:4px solid #E6E9EF;border-top-color:#3FC585;animation:ph-r .8s linear infinite;margin:26px auto}
+#progressor-home .ph-spin{width:38px;height:38px;border-radius:50%;border:4px solid var(--pg-line,#E6E9EF);border-top-color:#3FC585;animation:ph-r .8s linear infinite;margin:26px auto}
 @keyframes ph-r{to{transform:rotate(360deg)}}@keyframes ph-w{0%,100%{height:10px}50%{height:52px}}
 #progressor-home .ph-wave{display:flex;gap:4px;align-items:center;justify-content:center;height:64px;margin:12px 0 4px}
 #progressor-home .ph-wave i{width:5px;border-radius:3px;background:#3FC585;animation:ph-w 1s infinite ease-in-out}
 #progressor-home .ph-clock{display:block;text-align:center;font-size:18px}
-#progressor-home .ph-photo{width:100%;height:150px;object-fit:cover;border-radius:16px;margin:8px 0;background:#F3F4F7;display:block}
-#progressor-home .ph-heard{background:#F3F4F7;border-radius:16px;padding:12px 14px;font-size:15px;margin:8px 0}
-#progressor-home textarea{width:100%;border:1.5px solid #E6E9EF;border-radius:16px;padding:12px 14px;font:inherit;font-size:16px;color:#10131A;background:#fff;margin-top:8px;resize:vertical}
-#progressor-home .ph-item{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #E6E9EF}
-#progressor-home .ph-item small{color:#6B7585;display:block}
+#progressor-home .ph-photo{width:100%;height:150px;object-fit:cover;border-radius:16px;margin:8px 0;background:var(--pg-surface,#F3F4F7);display:block}
+#progressor-home .ph-heard{background:var(--pg-surface,#F3F4F7);border-radius:16px;padding:12px 14px;font-size:15px;margin:8px 0}
+#progressor-home textarea{width:100%;border:1.5px solid var(--pg-line,#E6E9EF);border-radius:16px;padding:12px 14px;font:inherit;font-size:16px;color:var(--pg-text,#10131A);background:var(--pg-raise,#fff);margin-top:8px;resize:vertical}
+#progressor-home .ph-item{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--pg-line,#E6E9EF)}
+#progressor-home .ph-item small{color:var(--pg-muted,#6B7585);display:block}
 #progressor-home .ph-step{display:flex;align-items:center;gap:4px}
-#progressor-home .ph-step button{width:44px;height:44px;border-radius:12px;border:0;background:#F3F4F7;color:#10131A;font-size:20px;cursor:pointer}
+#progressor-home .ph-step button{width:44px;height:44px;border-radius:12px;border:0;background:var(--pg-surface,#F3F4F7);color:var(--pg-text,#10131A);font-size:20px;cursor:pointer}
 #progressor-home .ph-step span{min-width:54px;text-align:center;font-weight:600}
-#progressor-home .ph-pair{display:flex;justify-content:space-between;align-items:center;gap:10px;background:#DEEBFF;color:#06254A;border-radius:16px;padding:10px 12px;margin-top:10px;font-size:14px}
+#progressor-home .ph-pair{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--pg-tint-supply,#DEEBFF);color:var(--pg-tint-supply-text,#06254A);border-radius:16px;padding:10px 12px;margin-top:10px;font-size:14px}
 #progressor-home .ph-tot{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0 4px;text-align:center}
 #progressor-home .ph-tot div{background:#5EE0A0;color:#06311C;border-radius:14px;padding:8px 4px}
 #progressor-home .ph-tot b{display:block;font-size:17px}#progressor-home .ph-tot span{font-size:11px}
-@media(prefers-reduced-motion:reduce){#progressor-home .ph-wave i,#progressor-home .ph-spin{animation:none}}#progressor-home .ph-locked .ph-btn{background:#10131A;color:#fff}
+@media(prefers-reduced-motion:reduce){#progressor-home .ph-wave i,#progressor-home .ph-spin{animation:none}}#progressor-home .ph-locked .ph-btn{background:var(--pg-ink,#10131A);color:var(--pg-on-ink,#fff)}
 #progressor-home .ph-i{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
-#progressor-home .ph-link{background:#F3F4F7;border-radius:20px;padding:14px 16px;margin-top:20px}
-#progressor-home .ph-link b{display:block;font-size:13px;color:#6B7585;font-weight:600;margin-bottom:2px}
+#progressor-home .ph-foot{display:flex;gap:18px}
+#progressor-home .ph-themes{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:10px;margin-top:8px}
+#progressor-home .ph-theme{border:2px solid transparent;border-radius:18px;padding:10px 8px;background:var(--pg-surface,#F3F4F7);color:var(--pg-text,#10131A);font:inherit;font-size:13px;font-weight:600;cursor:pointer;display:grid;gap:8px;justify-items:center}
+#progressor-home .ph-theme[aria-pressed=true]{border-color:var(--pg-ink,#10131A)}
+#progressor-home .ph-theme i{width:100%;height:44px;border-radius:12px;border:1px solid var(--pg-line,#E6E9EF)}
+#progressor-home .ph-theme[data-theme-name=classic] i{background:linear-gradient(135deg,#fff 50%,#0E1014 50%)}
+#progressor-home .ph-theme[data-theme-name=sand] i{background:linear-gradient(135deg,#FBF7F0 50%,#221C15 50%)}
+#progressor-home .ph-theme[data-theme-name=graphite] i{background:linear-gradient(135deg,#E9EBEF 50%,#15171B 50%)}
+#progressor-home .ph-theme[data-theme-name=ocean] i{background:linear-gradient(135deg,#E6EFF8 50%,#101E2E 50%)}
+#progressor-home .ph-theme[data-theme-name=forest] i{background:linear-gradient(135deg,#E7EFE5 50%,#132016 50%)}
+#progressor-home .ph-link{background:var(--pg-surface,#F3F4F7);border-radius:20px;padding:14px 16px;margin-top:20px}
+#progressor-home .ph-link b{display:block;font-size:13px;color:var(--pg-muted,#6B7585);font-weight:600;margin-bottom:2px}
 #progressor-home .ph-shade{position:fixed;inset:0;z-index:2;background:rgba(10,12,18,.45);display:flex;align-items:flex-end;justify-content:center}
-#progressor-home .ph-sheet{background:#fff;width:100%;max-width:460px;border-radius:26px 26px 0 0;padding:16px 16px calc(26px + env(safe-area-inset-bottom,0px));max-height:86vh;overflow:auto}
+#progressor-home .ph-sheet{background:var(--pg-raise,#fff);width:100%;max-width:460px;border-radius:26px 26px 0 0;padding:16px 16px calc(26px + env(safe-area-inset-bottom,0px));max-height:86vh;overflow:auto}
 #progressor-home .ph-sheet-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:4px}
 #progressor-home .ph-slot{margin-top:14px}
 #progressor-home .ph-slot-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px}
-#progressor-home .ph-slot-head span{color:#6B7585;font-weight:400}
+#progressor-home .ph-slot-head span{color:var(--pg-muted,#6B7585);font-weight:400}
 #progressor-home .ph-chips{display:flex;flex-wrap:wrap;gap:8px}
-#progressor-home .ph-chip{border:1.5px solid #E6E9EF;background:#fff;border-radius:14px;padding:9px 12px;font:inherit;font-size:14px;cursor:pointer;color:#10131A;min-height:44px}
+#progressor-home .ph-chip{border:1.5px solid var(--pg-line,#E6E9EF);background:var(--pg-raise,#fff);border-radius:14px;padding:9px 12px;font:inherit;font-size:14px;cursor:pointer;color:var(--pg-text,#10131A);min-height:44px}
 #progressor-home .ph-chip.on{background:#6FB6FF;border-color:#6FB6FF;color:#06254A}
 #progressor-home .ph-mini{border:0;font:inherit;font-size:13px;font-weight:600;background:#6FB6FF;color:#06254A;border-radius:10px;padding:0 12px;min-height:44px;cursor:pointer}
-#progressor-home .ph-toast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:3;background:#10131A;color:#fff;border-radius:14px;padding:11px 14px;font-size:14px;display:flex;align-items:center;gap:10px;max-width:calc(100% - 32px)}
+#progressor-home .ph-toast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:3;background:var(--pg-ink,#10131A);color:var(--pg-on-ink,#fff);border-radius:14px;padding:11px 14px;font-size:14px;display:flex;align-items:center;gap:10px;max-width:calc(100% - 32px)}
 #progressor-home .ph-toast button{border:0;background:#6FB6FF;color:#06254A;font:inherit;font-weight:600;border-radius:10px;padding:8px 10px;cursor:pointer}`;
     document.head.append(style);
     body = h('div', {class: 'ph-body'});
@@ -420,7 +449,7 @@
   }
   function show() {
     if (!root) build();
-    opened = true; root.classList.remove('ph-closed');
+    opened = true; painted = false; root.classList.remove('ph-closed');
     try { sessionStorage.setItem(seenKey, '1'); } catch {}
     document.dispatchEvent(new CustomEvent('progressor:home', {detail: {open: true}}));
     render(); void load();

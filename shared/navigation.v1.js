@@ -66,6 +66,43 @@
    };
   }
 
+  // Colour scheme follows Telegram; the chosen theme is shared by all three products on this device.
+  const themes = ['classic', 'sand', 'graphite', 'ocean', 'forest'];
+  function applyLook() {
+    const root = document.documentElement, tg = window.Telegram?.WebApp;
+    const scheme = tg?.colorScheme === 'dark' || (!tg?.colorScheme && window.matchMedia?.('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+    let theme = 'classic'; try { theme = localStorage.getItem('progressor.theme') || 'classic'; } catch {}
+    if (!themes.includes(theme)) theme = 'classic';
+    root.dataset.pgScheme = scheme;
+    if (theme === 'classic') delete root.dataset.pgTheme; else root.dataset.pgTheme = theme;
+    try { localStorage.setItem('progressor.scheme', scheme); } catch {}
+    if (root.dataset.pgUi === '2') { try { const colour = getComputedStyle(root).getPropertyValue('--pg-bg').trim(); if (colour) { tg?.setHeaderColor?.(colour); tg?.setBackgroundColor?.(colour); } } catch {} }
+  }
+  applyLook();
+  try { window.Telegram?.WebApp?.onEvent?.('themeChanged', applyLook); } catch {}
+  window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', applyLook);
+  new MutationObserver(applyLook).observe(document.documentElement, {attributes: true, attributeFilter: ['data-pg-ui']});
+  // Real 3D: a pressed tile tilts toward the finger in perspective and settles back.
+  if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+    let tilted = null;
+    const settle = () => { if (!tilted) return; tilted.style.transition = 'transform .45s cubic-bezier(.2,.9,.3,1.2)'; tilted.style.transform = ''; tilted = null; };
+    const lean = event => {
+      const tile = event.target.closest?.('.ph-tile,.u2-hero,.u2-tile');
+      if (!tile || document.documentElement.dataset.pgUi !== '2' && !tile.closest('#progressor-home')) { settle(); return; }
+      if (tilted && tilted !== tile) settle();
+      const box = tile.getBoundingClientRect(), x = (event.clientX - box.left) / box.width - .5, y = (event.clientY - box.top) / box.height - .5;
+      tilted = tile; tile.style.transition = 'transform .08s linear';
+      tile.style.transform = `perspective(700px) rotateX(${(-y * 9).toFixed(2)}deg) rotateY(${(x * 9).toFixed(2)}deg) translateZ(0) scale(.985)`;
+    };
+    document.addEventListener('pointerdown', lean, {passive: true});
+    document.addEventListener('pointermove', event => { if (tilted && event.buttons !== 0 || event.pointerType === 'mouse' && event.target.closest?.('.ph-tile,.u2-hero')) lean(event); else if (tilted && event.pointerType === 'mouse') settle(); }, {passive: true});
+    for (const name of ['pointerup', 'pointercancel', 'pointerleave']) document.addEventListener(name, settle, {passive: true});
+    window.addEventListener('scroll', settle, {passive: true, capture: true});
+  }
+  window.Progressor.themes = themes;
+  window.Progressor.theme = () => document.documentElement.dataset.pgTheme || 'classic';
+  window.Progressor.setTheme = name => { if (!themes.includes(name)) return; try { if (name === 'classic') localStorage.removeItem('progressor.theme'); else localStorage.setItem('progressor.theme', name); } catch {} applyLook(); };
+
   // A purpose marker selects only an existing native view. It never grants access.
   // The sole continuation record is tab-local, short-lived and bound to the launch.
   const transferKey='progressor.transfer.v1',transferTtl=10*60*1000;
@@ -516,15 +553,25 @@
         food: 'M5 21c.5-4.5 2.5-8 7-10M9 18c6.218 0 10.5-3.288 11-12V4h-4.014c-9 0-11.986 4-12 9 0 1 0 3 2 5h3z',
         supply: 'M4.5 12.5l8-8a4.94 4.94 0 0 1 7 7l-8 8a4.94 4.94 0 0 1-7-7M8.5 8.5l7 7'};
       element('style', `
-        #progressor-tabbar{position:fixed;left:0;right:0;bottom:0;z-index:31;background:rgba(255,255,255,.88);-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);border-top:1px solid #E6E9EF;display:grid;grid-template-columns:repeat(4,1fr);padding:6px max(16px,calc(50% - 214px)) calc(6px + env(safe-area-inset-bottom,0px));box-sizing:border-box}
+        #progressor-tabbar{position:fixed;left:0;right:0;bottom:0;z-index:31;background:var(--pg-glass,rgba(255,255,255,.88));-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);border-top:1px solid var(--pg-line,#E6E9EF);display:grid;grid-template-columns:repeat(4,1fr);padding:6px max(16px,calc(50% - 214px)) calc(6px + env(safe-area-inset-bottom,0px));box-sizing:border-box}
         #progressor-tabbar[hidden],html.progressor-sheet-open #progressor-tabbar{display:none}
-        #progressor-tabbar button{border:0;background:none;color:#A3AAB8;min-height:48px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .15s,transform .12s}
+        #progressor-tabbar button{border:0;background:none;color:var(--pg-muted,#A3AAB8);min-height:48px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:color .15s,transform .12s}
         #progressor-tabbar button:active{transform:scale(.9)}
-        #progressor-tabbar button[aria-current]{color:#10131A}
+        #progressor-tabbar button[aria-current]{color:var(--pg-text,#10131A)}
         #progressor-tabbar svg{width:26px;height:26px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
         html[data-pg-ui="2"] #progressor-shell{background:none;border:0;padding:0}
         html[data-pg-ui="2"] #progressor-shell nav{display:none}
         html[data-pg-ui="2"] #progressor-context,html[data-pg-ui="2"] #progressor-transfer{background:#13213d;padding:calc(8px + env(safe-area-inset-top,0px)) 12px 12px;border-radius:0 0 18px 18px}
+        html[data-pg-ui="2"]{--pg-bg:#fff;--pg-raise:#fff;--pg-surface:#F3F4F7;--pg-text:#10131A;--pg-muted:#6B7585;--pg-line:#E6E9EF;--pg-ink:#10131A;--pg-on-ink:#fff;--pg-glass:rgba(255,255,255,.88);--pg-tint-gym:#FFE7DF;--pg-tint-gym-text:#3B1206;--pg-tint-food:#DDF6E8;--pg-tint-food-text:#0B4A2A;--pg-tint-supply:#DEEBFF;--pg-tint-supply-text:#06254A}
+        html[data-pg-ui="2"][data-pg-theme="sand"]{--pg-bg:#FBF7F0;--pg-raise:#FFFDF9;--pg-surface:#F1EADF;--pg-text:#2A2420;--pg-muted:#7A6F60;--pg-line:#E3D9C9;--pg-ink:#2A2420;--pg-glass:rgba(251,247,240,.88)}
+        html[data-pg-ui="2"][data-pg-theme="graphite"]{--pg-bg:#F4F5F7;--pg-raise:#fff;--pg-surface:#E9EBEF;--pg-line:#D9DDE4;--pg-glass:rgba(244,245,247,.88)}
+        html[data-pg-ui="2"][data-pg-theme="ocean"]{--pg-bg:#F3F8FD;--pg-raise:#fff;--pg-surface:#E6EFF8;--pg-text:#0E2A47;--pg-muted:#5E7690;--pg-line:#D3E1F0;--pg-ink:#0E2A47;--pg-glass:rgba(243,248,253,.88)}
+        html[data-pg-ui="2"][data-pg-theme="forest"]{--pg-bg:#F4F8F3;--pg-raise:#fff;--pg-surface:#E7EFE5;--pg-text:#16281B;--pg-muted:#61745F;--pg-line:#D5E0D2;--pg-ink:#16281B;--pg-glass:rgba(244,248,243,.88)}
+        html[data-pg-ui="2"][data-pg-scheme="dark"]{--pg-bg:#0E1014;--pg-raise:#242833;--pg-surface:#1A1D24;--pg-text:#F2F4F8;--pg-muted:#9AA3B2;--pg-line:#2C313C;--pg-ink:#F2F4F8;--pg-on-ink:#10131A;--pg-glass:rgba(14,16,20,.86);--pg-tint-gym:#3A1D14;--pg-tint-gym-text:#FFD0C2;--pg-tint-food:#12301F;--pg-tint-food-text:#BFF2D6;--pg-tint-supply:#132A4A;--pg-tint-supply-text:#CFE3FF}
+        html[data-pg-ui="2"][data-pg-scheme="dark"][data-pg-theme="sand"]{--pg-bg:#17130E;--pg-raise:#2D261D;--pg-surface:#221C15;--pg-text:#F5EEE3;--pg-muted:#B0A391;--pg-line:#3A3126;--pg-ink:#F5EEE3;--pg-on-ink:#17130E;--pg-glass:rgba(23,19,14,.86)}
+        html[data-pg-ui="2"][data-pg-scheme="dark"][data-pg-theme="graphite"]{--pg-bg:#0A0B0D;--pg-raise:#1F2227;--pg-surface:#15171B;--pg-line:#2A2E35;--pg-glass:rgba(10,11,13,.86)}
+        html[data-pg-ui="2"][data-pg-scheme="dark"][data-pg-theme="ocean"]{--pg-bg:#08121E;--pg-raise:#18293C;--pg-surface:#101E2E;--pg-text:#EAF2FB;--pg-muted:#93A8BF;--pg-line:#22364B;--pg-ink:#EAF2FB;--pg-on-ink:#08121E;--pg-glass:rgba(8,18,30,.86)}
+        html[data-pg-ui="2"][data-pg-scheme="dark"][data-pg-theme="forest"]{--pg-bg:#0B130D;--pg-raise:#1B2C1F;--pg-surface:#132016;--pg-text:#E9F3EA;--pg-muted:#98AD9B;--pg-line:#263A2A;--pg-ink:#E9F3EA;--pg-on-ink:#0B130D;--pg-glass:rgba(11,19,13,.86)}
       `, document.head);
       const tabbar = element('nav'); tabbar.id = 'progressor-tabbar'; tabbar.setAttribute('aria-label', 'Разделы');
       const tabs = {};
