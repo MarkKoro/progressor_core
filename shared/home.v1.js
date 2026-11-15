@@ -38,7 +38,7 @@
   }
 
   let session = null, generation = 0, busy = false;
-  const state = {gym: {status: 'loading'}, food: {status: 'loading'}, supply: {status: 'loading'}, relationship: null, gymFree: false, gymHint: null};
+  const state = {gym: {status: 'loading'}, food: {status: 'loading'}, supply: {status: 'loading'}, relationship: null, gymFree: false, gymHint: null, links: null};
   async function call(domain, path, body, options = {}) {
     // A product page can use the capture sheets before the home screen was ever opened.
     if (!session) session = await window.Progressor.renew();
@@ -74,6 +74,7 @@
       (allowed('gym') ? call('gym', '/day/start_hint') : Promise.resolve({ok: false})).then(v => { if (mine === generation) { state.gymHint = v.ok ? v.data : null; render(); } }),
       loadDomain('food', '/stats/today').then(v => { if (mine === generation) { state.food = v; render(); } }),
       loadDomain('supply', '/today').then(v => { if (mine === generation) { state.supply = v; render(); } }),
+      call('core', '/connections/links?target=' + source).then(v => { if (mine === generation) { state.links = v.ok ? v.data : null; render(); } }),
       call('core', '/connections/today?target=' + source).then(v => { if (mine === generation) { state.relationship = v.ok ? v.data?.relationship || null : null; render(); } })];
     await Promise.all(jobs);
   }
@@ -242,7 +243,7 @@
     let last = null; try { last = localStorage.getItem(gymKey); } catch {}
     return last === 'free' ? 'free' : 'plan';
   }
-  let opened = false, painted = false;
+  let opened = false, painted = false, linksOpen = false;
   let root = null, body = null, sheet = null, toastNode = null, sheetKind = null, toastTimer = 0;
   function toast(message, actionLabel, action) {
     toastNode.replaceChildren(h('span', null, message));
@@ -270,6 +271,30 @@
             onclick: async () => { if (!await setUnits([u], u.taken ? 'none' : 'taken')) toast('Не удалось сохранить отметку. Список обновлён.'); }},
             u.name, u.kind === 'complex' ? h('small', null, ` ${u.done}/${u.count}`) : null))));
       }));
+  }
+  // Ask about one's own records. Food answers; the daily allowance is enforced on its server.
+  function openAsk(initial) {
+    const area = h('textarea', {rows: '3', maxlength: '500', placeholder: 'Хватает ли мне белка на этой неделе?', 'aria-label': 'Ваш вопрос'});
+    area.value = initial || '';
+    const out = h('div', {class: 'ph-answer', role: 'status', hidden: true}), note = h('p', {class: 'ph-muted'}, 'Ответ строится по вашим записям. Это не медицинская консультация.');
+    const button = h('button', {type: 'button', class: 'ph-btn dark grow', onclick: async () => {
+      const question = area.value.trim();
+      if (question.length < 3) { note.textContent = 'Напишите вопрос одной-двумя фразами.'; return; }
+      button.disabled = true; out.hidden = false; out.replaceChildren(h('div', {class: 'ph-spin', 'aria-label': 'Думаю'}));
+      const result = await call('food', '/ask', {question}, {timeout: 70000});
+      button.disabled = false;
+      if (sheetKind !== 'ask') return;
+      if (result.ok && result.data?.answer) {
+        out.replaceChildren(...String(result.data.answer).split(/\n+/).map(line => h('p', null, line)));
+        note.textContent = `Осталось вопросов сегодня: ${result.data.left_today}.` + (result.data.ecosystem_used ? '' : ' Учтён только дневник питания.');
+      } else {
+        out.replaceChildren(h('p', null, result.data?.detail?.message || (result.status ? 'Не удалось получить ответ. Попробуйте позже.' : 'Нет связи с сервером.')));
+      }
+    }}, 'Спросить');
+    openSheet('ask', h('h3', null, 'Спросить про свои данные'), area,
+      h('div', {class: 'ph-chips'}, ...['Хватает ли мне белка?', 'Что подтянуть на этой неделе?', 'Как сочетаются мои добавки?'].map(text => h('button', {type: 'button', class: 'ph-chip', onclick: () => { area.value = text; area.focus(); }}, text))),
+      h('div', {class: 'ph-btns'}, button), out, note);
+    area.focus();
   }
   const themeNames = {classic: 'Классика', sand: 'Песок', graphite: 'Графит', ocean: 'Океан', forest: 'Лес'};
   function openThemes() {
@@ -346,15 +371,28 @@
         next ? h('button', {type: 'button', class: 'ph-btn', onclick: e => { e.stopPropagation(); takeUnits(pending, next.title); }}, icon('ok'), 'Принял') : null);
     });
     const known = percents.filter(Number.isFinite), index = known.length ? Math.round(known.reduce((a, b) => a + Math.min(b, 100), 0) / known.length) : null;
-    const link = state.relationship
-      ? h('div', {class: 'ph-link'}, h('b', null, 'Связка дня'), state.relationship)
+    // Cross-product links: rules computed by Core from the owner's own records.
+    const cards = state.links?.cards || [], shown = linksOpen ? cards : cards.slice(0, 2);
+    const linkCards = shown.map(card => h('div', {class: 'ph-card'}, h('b', null, card.title), h('p', null, card.text),
+      card.action ? h('button', {type: 'button', class: 'ph-mini', onclick: () => go({kind: card.action.kind})}, card.action.label) : null));
+    const link = cards.length
+      ? h('div', {class: 'ph-links'}, h('div', {class: 'ph-links-head'}, h('b', null, cards.length > 1 ? 'Связки дня' : 'Связка дня'),
+          cards.length > 2 ? h('button', {type: 'button', class: 'ph-textlink', 'aria-expanded': String(linksOpen), onclick: () => { linksOpen = !linksOpen; render(); }}, linksOpen ? 'Свернуть' : `Ещё ${cards.length - 2}`) : null), ...linkCards)
+      : state.relationship ? h('div', {class: 'ph-link'}, h('b', null, 'Связка дня'), state.relationship)
       : h('div', {class: 'ph-link'}, h('b', null, 'Связки появятся с первыми записями'),
-          h('ul', null, h('li', null, 'Тренировка → сколько белка добрать'), h('li', null, 'Обед → добавки, которые пьют с едой'), h('li', null, 'Тяжёлый день → хватает ли энергии')));
+          h('ul', null, h('li', null, 'Тренировка → сколько белка добрать'), h('li', null, 'Еда → какие добавки она уже закрывает'), h('li', null, 'Добавки → что с чем лучше не пить вместе')));
+    const week = state.links?.week, streak = state.links?.streak;
+    const weekParts = week ? [week.workouts != null ? `тренировок ${week.workouts}` : null, week.food_days != null ? `питание ${week.food_days} из 7` : null, week.supply_days != null ? `добавки ${week.supply_days} из 7` : null].filter(Boolean) : [];
+    const weekBlock = weekParts.length ? h('div', {class: 'ph-week'}, h('b', null, 'Неделя'), h('p', null, weekParts.join(' · ')), week.headline ? h('p', {class: 'ph-muted'}, week.headline) : null) : null;
+    const streakChip = streak && streak.days > 0 ? h('div', {class: 'ph-streak' + (streak.today_recorded ? '' : ' wait'), role: 'img', 'aria-label': `Серия: ${streak.days} дн. подряд` + (streak.today_recorded ? '' : ', сегодня ещё нет записей')},
+      h('b', null, String(streak.days)), h('span', null, streak.today_recorded ? 'дн. подряд' : 'серия ждёт')) : null;
     body.classList.toggle('ph-settled', painted); painted = true;
     body.replaceChildren(
-      h('header', null, h('h1', null, name ? 'Привет, ' + name : 'Сегодня'),
-        h('div', {class: 'ph-idx', role: 'img', 'aria-label': index === null ? 'Данных за сегодня пока нет' : `День выполнен на ${index} процентов`}, h('b', null, index === null ? '—' : String(index)), h('span', null, 'день'))),
-      h('div', {class: 'ph-grid'}, gym, food, supply), link,
+      h('header', null, h('h1', null, name ? 'Привет, ' + name : 'Сегодня'), h('div', {class: 'ph-head-right'}, streakChip,
+        h('div', {class: 'ph-idx', role: 'img', 'aria-label': index === null ? 'Данных за сегодня пока нет' : `День выполнен на ${index} процентов`}, h('b', null, index === null ? '—' : String(index)), h('span', null, 'день')))),
+      h('div', {class: 'ph-grid'}, gym, food, supply),
+      state.food.status === 'ready' ? h('button', {type: 'button', class: 'ph-ask', onclick: () => openAsk('')}, h('span', null, 'Спросить про свои данные'), h('i', {'aria-hidden': 'true'}, '→')) : null,
+      link, weekBlock,
       h('div', {class: 'ph-foot'}, h('button', {type: 'button', class: 'ph-textlink', onclick: openThemes}, 'Оформление'),
         h('button', {type: 'button', class: 'ph-textlink', onclick: () => { hide(); window.Progressor.openSubscriptions?.(); }}, 'Подписки')));
   }
@@ -418,6 +456,26 @@
 @media(prefers-reduced-motion:reduce){#progressor-home .ph-wave i,#progressor-home .ph-spin{animation:none}}#progressor-home .ph-locked .ph-btn{background:var(--pg-ink,#10131A);color:var(--pg-on-ink,#fff)}
 #progressor-home .ph-i{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
 #progressor-home .ph-foot{display:flex;gap:18px}
+#progressor-home .ph-ask{display:flex;justify-content:space-between;align-items:center;width:100%;margin-top:18px;border:1.5px solid var(--pg-line,#E6E9EF);background:var(--pg-raise,#fff);color:var(--pg-muted,#6B7585);border-radius:18px;min-height:52px;padding:0 16px;font:inherit;font-size:15px;cursor:pointer}
+#progressor-home .ph-ask i{font-style:normal;color:var(--pg-text,#10131A);font-size:18px}
+#progressor-home .ph-answer{background:var(--pg-surface,#F3F4F7);border-radius:16px;padding:12px 14px;margin-top:12px}
+#progressor-home .ph-answer p{font-size:15px;margin:0 0 8px}#progressor-home .ph-answer p:last-child{margin-bottom:0}
+#progressor-home .ph-sheet .ph-chips{margin-top:8px}
+#progressor-home .ph-head-right{display:flex;gap:8px;align-items:stretch;flex:none}
+#progressor-home .ph-streak{background:var(--pg-tint-gym,#FFE7DF);color:var(--pg-tint-gym-text,#3B1206);border-radius:16px;padding:8px 12px;text-align:center;line-height:1.1}
+#progressor-home .ph-streak.wait{background:var(--pg-surface,#F3F4F7);color:var(--pg-muted,#6B7585)}
+#progressor-home .ph-streak b{display:block;font-size:20px}#progressor-home .ph-streak span{font-size:11px}
+#progressor-home .ph-links{margin-top:20px;display:grid;gap:8px}
+#progressor-home .ph-links-head{display:flex;justify-content:space-between;align-items:center}
+#progressor-home .ph-links-head b{font-size:13px;color:var(--pg-muted,#6B7585);font-weight:600}
+#progressor-home .ph-links-head .ph-textlink{padding:4px 0}
+#progressor-home .ph-card{background:var(--pg-surface,#F3F4F7);border-radius:20px;padding:14px 16px}
+#progressor-home .ph-card b{display:block;font-size:15px}
+#progressor-home .ph-card p{font-size:14px;margin:4px 0 0}
+#progressor-home .ph-card .ph-mini{margin-top:10px;background:var(--pg-ink,#10131A);color:var(--pg-on-ink,#fff)}
+#progressor-home .ph-week{background:var(--pg-surface,#F3F4F7);border-radius:20px;padding:14px 16px;margin-top:8px}
+#progressor-home .ph-week b{display:block;font-size:13px;color:var(--pg-muted,#6B7585);font-weight:600;margin-bottom:2px}
+#progressor-home .ph-week p{font-size:14px}
 #progressor-home .ph-themes{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:10px;margin-top:8px}
 #progressor-home .ph-theme{border:2px solid transparent;border-radius:18px;padding:10px 8px;background:var(--pg-surface,#F3F4F7);color:var(--pg-text,#10131A);font:inherit;font-size:13px;font-weight:600;cursor:pointer;display:grid;gap:8px;justify-items:center}
 #progressor-home .ph-theme[aria-pressed=true]{border-color:var(--pg-ink,#10131A)}

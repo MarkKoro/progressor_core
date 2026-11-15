@@ -62,6 +62,12 @@ def install(app,engine,claims):
         if target not in links.SOURCES:raise HTTPException(422,'Invalid target')
         return daily_overview(engine(request).store,claims(request)['sub'],target=target)
 
+    @app.get('/api/v1/me/connections/links')
+    def day_links_route(request:Request,target:str):
+        from .day_links import day_links
+        if target not in links.SOURCES:raise HTTPException(422,'Invalid target')
+        return day_links(engine(request).store,claims(request)['sub'],target=target,enabled_sources=engine(request).config.enabled_domains)
+
     @app.get('/api/v1/me/connections/changes')
     def changes(request:Request):
         from .connection_changes import recent

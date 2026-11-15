@@ -289,6 +289,19 @@ class Integration(unittest.TestCase):
                     self.assertIs(body['home'], expected, (listed, user))
                 self.assertEqual(client.get('/assets/home.v1.js').status_code, 200)
 
+    def test_day_links_route_is_owner_scoped_and_read_only(self):
+        with TestClient(create_app(self.config)) as client:
+            client.app.state.engine.poll()
+            tokens = client.post('/api/v1/sessions',json={'source':'food','init_data':launch(source='food')}).json()['assertions']
+            self.assertEqual(client.get('/api/v1/me/connections/links?target=food').status_code,401)
+            self.assertEqual(client.get('/api/v1/me/connections/links?target=nope',headers={'X-Progressor-Auth':tokens['core']}).status_code,422)
+            with client.app.state.engine.store.connection() as db: before=db.execute("SELECT count(*) FROM recommendations").fetchone()[0]
+            body = client.get('/api/v1/me/connections/links?target=food&user_id='+str(OTHER),headers={'X-Progressor-Auth':tokens['core']}).json()
+            self.assertEqual(body['schema_version'],1)
+            self.assertEqual(set(body),{'schema_version','day','cards','streak','week','coverage'})
+            with client.app.state.engine.store.connection() as db:
+                self.assertEqual(db.execute("SELECT count(*) FROM recommendations").fetchone()[0],before)
+
     def test_launch_signature_tampering_duplicate_expiration(self):
         for raw in (launch()+'&user=%7B%22id%22%3A1%7D',launch().replace('synthetic-launch','tampered'),launch(auth_date=1)):
             with self.assertRaises((ValueError,KeyError)): telegram_user(raw,TOKENS['gym'])
