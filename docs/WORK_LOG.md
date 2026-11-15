@@ -520,3 +520,14 @@ main); Node59 and navigation syntax pass. Not run: Playwright suites, Linux
 asset was exercised only against a synthetic fetch stub in a desktop browser.
 Next: publish with the list containing only the two owners, run `update-all`,
 verify on physical devices, then widen the list.
+
+## Shared Progressor look — 2026-11-15
+
+The page gained the shared light look (ui2), enabled per account by the Core
+session field `home` and remembered in localStorage `progressor.ui`. Rules are
+scoped to html[data-pg-ui="2"]; removing the flag returns the previous interface.
+The Core shell hides its top bar on such pages and shows one bottom tab bar.
+Evidence and limits are in the commit messages: Node suites and a desktop
+browser against canned answers only; Playwright, Linux Python suites on a
+workstation and physical Telegram devices were not run by the author. The
+coordinated updater ran each repository's own checks before switching.
