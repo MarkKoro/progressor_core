@@ -291,8 +291,10 @@
   }
   function lockedTile(domain, cls, title) {
     return h('div', {class: 'ph-tile ph-locked ' + cls},
-      h('div', {class: 'ph-lock'}, icon('lock')), h('h2', null, title), h('p', null, 'Раздел не подключён'),
-      h('div', {class: 'ph-btns'}, h('button', {type: 'button', class: 'ph-btn grow', onclick: () => { hide(); window.Progressor.openProductSubscriptions?.(domain); }}, 'Открыть доступ')));
+      h('div', {class: 'ph-lock'}, icon('lock')), h('h2', null, title),
+      h('p', null, {gym: 'План, подходы с прошлым результатом и прогресс весов', food: 'Калории и БЖУ по фото, голосу или тексту', supply: 'Расписание добавок, отметка в одно касание и напоминания'}[domain] || 'Раздел не подключён'),
+      h('div', {class: 'ph-btns'}, h('button', {type: 'button', class: 'ph-btn grow', onclick: () => { hide(); window.Progressor.openProductSubscriptions?.(domain); }}, 'Подключить'),
+        h('button', {type: 'button', class: 'ph-btn light', onclick: () => { hide(); window.Progressor.openBundle?.(); }}, 'Все три')));
   }
   function plainTile(cls, title, text) {
     return h('div', {class: 'ph-tile ' + cls}, ring(NaN), h('h2', null, title), h('p', null, text),
@@ -375,9 +377,8 @@
 #progressor-home p{margin:2px 0 0;font-size:13px}#progressor-home .ph-muted{color:var(--pg-muted,#6B7585);font-size:13px}
 #progressor-home .ph-x{border:0;background:var(--pg-surface,#F3F4F7);color:var(--pg-text,#10131A);width:44px;height:44px;border-radius:14px;font-size:22px;line-height:1;cursor:pointer;flex:none}
 #progressor-home .ph-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 12px}
-#progressor-home .ph-tile{border-radius:24px;padding:16px;min-width:0;transform-style:preserve-3d;will-change:transform;animation:ph-rise .5s cubic-bezier(.2,.8,.2,1) both}
+#progressor-home .ph-tile{border-radius:24px;padding:16px;min-width:0;animation:ph-rise .5s cubic-bezier(.2,.8,.2,1) both}
 #progressor-home .ph-tile:nth-child(2){animation-delay:.06s}#progressor-home .ph-tile:nth-child(3){animation-delay:.12s}
-#progressor-home .ph-tile .ph-ring,#progressor-home .ph-tile .ph-btns,#progressor-home .ph-tile>.ph-btn{transform:translateZ(18px)}
 #progressor-home .ph-settled .ph-tile{animation:none}
 @keyframes ph-rise{from{opacity:0;transform:perspective(700px) rotateX(14deg) translateY(18px)}}
 @media(prefers-reduced-motion:reduce){#progressor-home .ph-tile{animation:none}}

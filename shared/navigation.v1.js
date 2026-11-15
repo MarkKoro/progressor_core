@@ -85,14 +85,14 @@
   // Real 3D: a pressed tile tilts toward the finger in perspective and settles back.
   if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
     let tilted = null;
-    const settle = () => { if (!tilted) return; tilted.style.transition = 'transform .45s cubic-bezier(.2,.9,.3,1.2)'; tilted.style.transform = ''; tilted = null; };
+    const settle = () => { if (!tilted) return; tilted.style.transition = 'transform .45s cubic-bezier(.2,.9,.3,1.2)'; tilted.style.transform = ''; const done = tilted; tilted = null; setTimeout(() => { if (tilted !== done) done.style.transition = ''; }, 500); };
     const lean = event => {
       const tile = event.target.closest?.('.ph-tile,.u2-hero,.u2-tile');
       if (!tile || document.documentElement.dataset.pgUi !== '2' && !tile.closest('#progressor-home')) { settle(); return; }
       if (tilted && tilted !== tile) settle();
       const box = tile.getBoundingClientRect(), x = (event.clientX - box.left) / box.width - .5, y = (event.clientY - box.top) / box.height - .5;
       tilted = tile; tile.style.transition = 'transform .08s linear';
-      tile.style.transform = `perspective(700px) rotateX(${(-y * 9).toFixed(2)}deg) rotateY(${(x * 9).toFixed(2)}deg) translateZ(0) scale(.985)`;
+      tile.style.transform = `perspective(700px) rotateX(${(-y * 9).toFixed(2)}deg) rotateY(${(x * 9).toFixed(2)}deg) scale(.985)`;
     };
     document.addEventListener('pointerdown', lean, {passive: true});
     document.addEventListener('pointermove', event => { if (tilted && event.buttons !== 0 || event.pointerType === 'mouse' && event.target.closest?.('.ph-tile,.u2-hero')) lean(event); else if (tilted && event.pointerType === 'mouse') settle(); }, {passive: true});
