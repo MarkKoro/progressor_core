@@ -62,6 +62,24 @@ def candidate(store,user_id,prefs,now=None,enabled_sources=None):
                 lo=sum(e['net_above_rest_kcal_range'][0] for e in estimates);hi=sum(e['net_above_rest_kcal_range'][1] for e in estimates)
                 text+=f' По записанной длительности сверх покоя примерно {lo}–{hi} ккал; оценка не прибавлена к цели.'
             return {'kind':'post_workout','day':local.date().isoformat(),'delivery_key':hint['delivery_key'],'text':text,'action':'open_food'}
+    # Sunday evening: one line about the whole week across the connected products. It uses the
+    # weekly-review opt-in and the same delivery kind, so the Food bot needs no new consumer.
+    if policy['frequency']!='quiet' and prefs.get('nutrient_enabled') and local.weekday()==6 and 17<=local.hour<21 and now.timestamp()-prefs.get('enabled_at',now.timestamp())>=86400:
+        from .day_links import day_links
+        links=day_links(store,user_id,now=now,target='food',enabled_sources=enabled_sources)
+        week=links['week'];parts=[]
+        if week.get('workouts') is not None:parts.append(f"Тренировок — {week['workouts']}.")
+        if week.get('food_days') is not None:
+            line=f"Питание записано {week['food_days']} из 7 дней"
+            if week.get('average_kcal') is not None:line+=f", в среднем {week['average_kcal']:g} ккал"+(f" при цели {week['target_kcal']:g}" if week.get('target_kcal') else '')+(f" и {week['average_protein']:g} г белка" if week.get('average_protein') is not None else '')
+            parts.append(line+'.')
+        if week.get('supply_days') is not None:parts.append(f"Добавки отмечены {week['supply_days']} из 7 дней.")
+        key='week_summary:'+local.strftime('%G-W%V')
+        if parts and (week.get('food_days') or week.get('workouts') or week.get('supply_days')) and not store.hint_was_seen(user_id,'food',key):
+            text='Итог недели\n\n'+' '.join(parts)
+            if links['streak']['days']>1:text+=f" Серия — {links['streak']['days']} дн. подряд."
+            if week.get('headline'):text+='\n\n'+week['headline']
+            return {'kind':'nutrient_review','day':local.date().isoformat(),'delivery_key':key,'text':text+'\n\nЭто сводка ваших записей, а не оценка здоровья.','action':'open_food'}
     if policy['frequency']!='quiet' and prefs.get('nutrient_enabled') and 12<=local.hour<20 and now.timestamp()-prefs.get('enabled_at',now.timestamp())>=86400:
         hint=next((h for h in c['hints'] if h['key'].startswith('food_sources_') and unseen(h)),None)
         if hint:

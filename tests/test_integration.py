@@ -6,7 +6,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 from unittest.mock import patch
@@ -298,9 +298,22 @@ class Integration(unittest.TestCase):
             with client.app.state.engine.store.connection() as db: before=db.execute("SELECT count(*) FROM recommendations").fetchone()[0]
             body = client.get('/api/v1/me/connections/links?target=food&user_id='+str(OTHER),headers={'X-Progressor-Auth':tokens['core']}).json()
             self.assertEqual(body['schema_version'],1)
-            self.assertEqual(set(body),{'schema_version','day','cards','streak','week','coverage'})
+            self.assertEqual(set(body),{'schema_version','day','cards','streak','week','coverage','goal','goal_label','rest_active','preferences_revision'})
             with client.app.state.engine.store.connection() as db:
                 self.assertEqual(db.execute("SELECT count(*) FROM recommendations").fetchone()[0],before)
+
+    def test_sunday_evening_week_summary_uses_the_weekly_review_opt_in(self):
+        from progressor_core.notifications import candidate
+        prefs={'nutrient_enabled':True,'enabled_at':0,'timezone':'Europe/Moscow'}
+        sunday=datetime(2026,10,11,15,0,tzinfo=timezone.utc)  # 18:00 in Moscow
+        item=candidate(self.engine.store,str(USER),prefs,now=sunday)
+        self.assertIsNotNone(item)
+        self.assertEqual((item['kind'],item['delivery_key'],item['action']),('nutrient_review','week_summary:2026-W41','open_food'))
+        self.assertTrue(item['text'].startswith('Итог недели'))
+        self.assertIn('не оценка здоровья',item['text'])
+        for moment,options in ((sunday.replace(hour=8),prefs),(sunday-timedelta(days=1),prefs),(sunday,{**prefs,'nutrient_enabled':False})):
+            other=candidate(self.engine.store,str(USER),options,now=moment)
+            self.assertFalse(other and other['delivery_key'].startswith('week_summary'),(moment,options))
 
     def test_launch_signature_tampering_duplicate_expiration(self):
         for raw in (launch()+'&user=%7B%22id%22%3A1%7D',launch().replace('synthetic-launch','tampered'),launch(auth_date=1)):

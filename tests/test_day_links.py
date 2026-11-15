@@ -20,15 +20,15 @@ def data(nutrients=None, supplements=(), fat=40, protein_left=0, workouts=0, kca
             'activity': {'completed_workout_count': workouts}}
 
 
-def keys(result):
-    return [card['key'] for card in result['cards']]
+def keys(result, starters=False):
+    return [card['key'] for card in result['cards'] if starters or not card['key'].startswith(('first_', 'streak_', 'supply_missed'))]
 
 
 class DayLinks(unittest.TestCase):
     def test_food_covering_a_taken_supplement_is_reported_without_advice_to_stop(self):
         result = build(data({'vitamin_c': nutrient(140, 'mg')}, ['Витамин C 500']), [], NOW, DAY, ZONE)
         self.assertEqual(keys(result), ['covered_vitamin_c'])
-        text = result['cards'][0]['text']
+        text = next(card['text'] for card in result['cards'] if card['key'] == 'covered_vitamin_c')
         self.assertIn('не анализ', text)
         for word in ('отмените', 'прекратите', 'дефицит'):
             self.assertNotIn(word, text)
@@ -65,6 +65,60 @@ class DayLinks(unittest.TestCase):
         self.assertEqual(result['streak'], {'days': 3, 'today_recorded': False})
         self.assertEqual(build(data(), entities + [food('2026-11-15')], NOW, DAY, ZONE)['streak'], {'days': 4, 'today_recorded': True})
         self.assertEqual(build(data(), [food('2026-11-10')], NOW, DAY, ZONE)['streak']['days'], 0)
+
+    def test_cold_start_offers_one_first_step_per_connected_empty_product(self):
+        result = build(data(), [], NOW, DAY, ZONE)
+        self.assertEqual(keys(result, starters=True)[:3], ['first_gym', 'first_food', 'first_supply'])
+        recorded = [{'source': 'food', 'entity_id': 'daily:2026-11-14', 'payload': {'source_local_date': '2026-11-14', 'logged_meal_count': 1}}]
+        self.assertNotIn('first_food', keys(build(data(supplements=['D3']), recorded, NOW, DAY, ZONE), starters=True))
+        self.assertNotIn('first_supply', keys(build(data(supplements=['D3']), recorded, NOW, DAY, ZONE), starters=True))
+
+    def test_goal_changes_how_the_same_calories_read(self):
+        def with_goal(goal, kcal):
+            d = data(kcal=kcal)
+            d['profile'] = {'values': {'goal': goal}}
+            return build(d, [], NOW, DAY, ZONE)
+        self.assertIn('goal_gain_under', keys(with_goal('gain', 2000)))
+        self.assertIn('goal_lose_over', keys(with_goal('lose', 2800)))
+        self.assertEqual(keys(with_goal('maintain', 2000)), [])
+        self.assertEqual((with_goal('gain', 2400)['goal'], with_goal('gain', 2400)['goal_label']), ('gain', 'набрать'))
+        self.assertIsNone(with_goal('nonsense', 2400)['goal'])
+
+    def test_partners_powder_and_diet_quality(self):
+        nutrients = {'vitamin_c': nutrient(20, 'mg'), 'vitamin_d': nutrient(3, 'ug'), 'fiber': nutrient(9, 'g'), 'sodium': nutrient(3600, 'mg'), 'sugar': nutrient(40, 'g')}
+        d = data(nutrients, ['Железо хелат', 'Кальций цитрат', 'Сывороточный протеин'])
+        d['nutrition']['history']['7']['averages_on_logged_days']['protein'] = 90
+        found = keys(build(d, [], NOW, DAY, ZONE))
+        for key in ('partner_iron_c', 'partner_calcium_d', 'powder_not_logged'):
+            self.assertIn(key, found)
+        self.assertLessEqual(len(build(d, [], NOW, DAY, ZONE)['cards']), 8)
+        quality = keys(build(data({'fiber': nutrient(9, 'g'), 'sodium': nutrient(3600, 'mg'), 'sugar': nutrient(40, 'g')}, ['D3']), [], NOW, DAY, ZONE))
+        self.assertEqual(quality, ['fiber_low', 'sodium_high'])
+
+    def test_snack_before_the_usual_training_hour_only_on_a_usual_weekday(self):
+        sunday_evenings = [{'source': 'gym', 'entity_id': f'w{i}', 'payload': {'completed_at': f'2026-{m}T15:30:00Z'}} for i, m in enumerate(('10-18', '10-25', '11-01', '11-08'))]
+        afternoon = datetime(2026, 11, 15, 13, tzinfo=timezone.utc)  # 16:00 local, usual end 18:00
+        self.assertIn('pre_workout_meal', keys(build(data(), sunday_evenings, afternoon, DAY, ZONE)))
+        self.assertNotIn('pre_workout_meal', keys(build(data(), sunday_evenings, NOW.replace(hour=5), DAY, ZONE)))
+        mondays = [{'source': 'gym', 'entity_id': f'm{i}', 'payload': {'completed_at': f'2026-{m}T15:30:00Z'}} for i, m in enumerate(('10-19', '10-26', '11-02', '11-09'))]
+        self.assertNotIn('pre_workout_meal', keys(build(data(), mondays, afternoon, DAY, ZONE)))
+
+    def test_late_stimulant_week_gap_and_rest_day_keeping_the_streak(self):
+        evening = {'source': 'supply', 'entity_id': 'intake:1:3:2026-11-15', 'occurred_at': '2026-11-15T17:30:00Z', 'payload': {'status': 'taken', 'source_local_date': '2026-11-15', 'name': 'Предтрен'}}
+        self.assertIn('late_stimulant', keys(build(data(supplements=['Предтрен']), [evening], NOW, DAY, ZONE)))
+        morning = {**evening, 'occurred_at': '2026-11-15T06:00:00Z'}
+        self.assertNotIn('late_stimulant', keys(build(data(supplements=['Предтрен']), [morning], NOW, DAY, ZONE)))
+        last_week = [{'source': 'gym', 'entity_id': f'g{i}', 'payload': {'completed_at': f'2026-11-0{d}T10:00:00Z'}} for i, d in enumerate((3, 5))]
+        self.assertIn('gym_week_gap', keys(build(data(), last_week, NOW, DAY, ZONE)))
+        self.assertNotIn('gym_week_gap', keys(build(data(), last_week, NOW, DAY, ZONE, rest_days={'2026-11-14'})))
+        food = lambda day: {'source': 'food', 'entity_id': 'daily:' + day, 'payload': {'source_local_date': day, 'logged_meal_count': 1}}
+        self.assertEqual(build(data(), [food('2026-11-13'), food('2026-11-15')], NOW, DAY, ZONE)['streak']['days'], 1)
+        self.assertEqual(build(data(), [food('2026-11-13'), food('2026-11-15')], NOW, DAY, ZONE, rest_days={'2026-11-14'})['streak']['days'], 3)
+
+    def test_streak_milestone_is_celebrated_once_it_is_reached_today(self):
+        food = [{'source': 'food', 'entity_id': f'daily:2026-11-{d}', 'payload': {'source_local_date': f'2026-11-{d}', 'logged_meal_count': 1}} for d in (13, 14, 15)]
+        self.assertIn('streak_3', keys(build(data(), food, NOW, DAY, ZONE), starters=True))
+        self.assertNotIn('streak_3', keys(build(data(), food[:2], NOW, DAY, ZONE), starters=True))
 
     def test_absent_sources_stay_silent_and_week_marks_them_unknown(self):
         result = build({'nutrition': None, 'supply': None, 'activity': None}, [], NOW, DAY, ZONE)

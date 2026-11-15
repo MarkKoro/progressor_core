@@ -272,6 +272,24 @@
             u.name, u.kind === 'complex' ? h('small', null, ` ${u.done}/${u.count}`) : null))));
       }));
   }
+  // "Понятно" hides a card on this device for a week; the rule itself keeps running on the server.
+  const hiddenKey = 'progressor.links.hidden';
+  function hiddenCards() {
+    try { const saved = JSON.parse(localStorage.getItem(hiddenKey) || '{}'), now = Date.now(); return new Set(Object.keys(saved).filter(key => saved[key] > now)); } catch { return new Set(); }
+  }
+  function hideCard(cardKey) {
+    try { const saved = JSON.parse(localStorage.getItem(hiddenKey) || '{}'), now = Date.now(); for (const key of Object.keys(saved)) if (saved[key] <= now) delete saved[key]; saved[cardKey] = now + 7 * 86400000; localStorage.setItem(hiddenKey, JSON.stringify(saved)); } catch {}
+  }
+  // A rest day: Core pauses hints and reminders until tomorrow morning and the streak is kept.
+  async function toggleRest() {
+    if (busy) return;
+    busy = true;
+    const resting = !!state.links?.rest_active, morning = new Date(); morning.setHours(29, 0, 0, 0);
+    const result = await call('core', '/connections', {action: 'preferences', revision: state.links?.preferences_revision ?? 0, patch: resting ? {paused: false, pause_until: null} : {paused: true, pause_until: Math.floor(morning.getTime() / 1000)}});
+    busy = false;
+    toast(result.ok ? (resting ? 'Обычный режим включён' : 'Сегодня отдых: напоминания и подсказки на паузе до утра, серия сохранится') : 'Не удалось изменить режим. Обновите экран и повторите.');
+    void load();
+  }
   // Ask about one's own records. Food answers; the daily allowance is enforced on its server.
   function openAsk(initial) {
     const area = h('textarea', {rows: '3', maxlength: '500', placeholder: 'Хватает ли мне белка на этой неделе?', 'aria-label': 'Ваш вопрос'});
@@ -372,9 +390,10 @@
     });
     const known = percents.filter(Number.isFinite), index = known.length ? Math.round(known.reduce((a, b) => a + Math.min(b, 100), 0) / known.length) : null;
     // Cross-product links: rules computed by Core from the owner's own records.
-    const cards = state.links?.cards || [], shown = linksOpen ? cards : cards.slice(0, 2);
+    const cards = (state.links?.cards || []).filter(card => !hiddenCards().has(card.key)), shown = linksOpen ? cards : cards.slice(0, 2);
     const linkCards = shown.map(card => h('div', {class: 'ph-card'}, h('b', null, card.title), h('p', null, card.text),
-      card.action ? h('button', {type: 'button', class: 'ph-mini', onclick: () => go({kind: card.action.kind})}, card.action.label) : null));
+      h('div', {class: 'ph-card-actions'}, card.action ? h('button', {type: 'button', class: 'ph-mini', onclick: () => go({kind: card.action.kind})}, card.action.label) : null,
+        h('button', {type: 'button', class: 'ph-textlink', onclick: () => { hideCard(card.key); render(); }}, 'Понятно'))));
     const link = cards.length
       ? h('div', {class: 'ph-links'}, h('div', {class: 'ph-links-head'}, h('b', null, cards.length > 1 ? 'Связки дня' : 'Связка дня'),
           cards.length > 2 ? h('button', {type: 'button', class: 'ph-textlink', 'aria-expanded': String(linksOpen), onclick: () => { linksOpen = !linksOpen; render(); }}, linksOpen ? 'Свернуть' : `Ещё ${cards.length - 2}`) : null), ...linkCards)
@@ -383,7 +402,8 @@
           h('ul', null, h('li', null, 'Тренировка → сколько белка добрать'), h('li', null, 'Еда → какие добавки она уже закрывает'), h('li', null, 'Добавки → что с чем лучше не пить вместе')));
     const week = state.links?.week, streak = state.links?.streak;
     const weekParts = week ? [week.workouts != null ? `тренировок ${week.workouts}` : null, week.food_days != null ? `питание ${week.food_days} из 7` : null, week.supply_days != null ? `добавки ${week.supply_days} из 7` : null].filter(Boolean) : [];
-    const weekBlock = weekParts.length ? h('div', {class: 'ph-week'}, h('b', null, 'Неделя'), h('p', null, weekParts.join(' · ')), week.headline ? h('p', {class: 'ph-muted'}, week.headline) : null) : null;
+    const restNote = state.links?.rest_active ? h('div', {class: 'ph-week'}, h('b', null, 'Сегодня отдых'), h('p', null, 'Подсказки и напоминания на паузе до утра. Записи можно вести как обычно, серия сохранится.')) : null;
+    const weekBlock = weekParts.length ? h('div', {class: 'ph-week'}, h('b', null, 'Неделя' + (state.links?.goal_label ? ` · цель: ${state.links.goal_label}` : '')), h('p', null, weekParts.join(' · ')), week.headline ? h('p', {class: 'ph-muted'}, week.headline) : null) : null;
     const streakChip = streak && streak.days > 0 ? h('div', {class: 'ph-streak' + (streak.today_recorded ? '' : ' wait'), role: 'img', 'aria-label': `Серия: ${streak.days} дн. подряд` + (streak.today_recorded ? '' : ', сегодня ещё нет записей')},
       h('b', null, String(streak.days)), h('span', null, streak.today_recorded ? 'дн. подряд' : 'серия ждёт')) : null;
     body.classList.toggle('ph-settled', painted); painted = true;
@@ -392,8 +412,9 @@
         h('div', {class: 'ph-idx', role: 'img', 'aria-label': index === null ? 'Данных за сегодня пока нет' : `День выполнен на ${index} процентов`}, h('b', null, index === null ? '—' : String(index)), h('span', null, 'день')))),
       h('div', {class: 'ph-grid'}, gym, food, supply),
       state.food.status === 'ready' ? h('button', {type: 'button', class: 'ph-ask', onclick: () => openAsk('')}, h('span', null, 'Спросить про свои данные'), h('i', {'aria-hidden': 'true'}, '→')) : null,
-      link, weekBlock,
-      h('div', {class: 'ph-foot'}, h('button', {type: 'button', class: 'ph-textlink', onclick: openThemes}, 'Оформление'),
+      restNote || link, weekBlock,
+      h('div', {class: 'ph-foot'}, state.links ? h('button', {type: 'button', class: 'ph-textlink', onclick: toggleRest}, state.links.rest_active ? 'Закончить отдых' : 'Сегодня отдых') : null,
+        h('button', {type: 'button', class: 'ph-textlink', onclick: openThemes}, 'Оформление'),
         h('button', {type: 'button', class: 'ph-textlink', onclick: () => { hide(); window.Progressor.openSubscriptions?.(); }}, 'Подписки')));
   }
   function build() {
@@ -472,7 +493,10 @@
 #progressor-home .ph-card{background:var(--pg-surface,#F3F4F7);border-radius:20px;padding:14px 16px}
 #progressor-home .ph-card b{display:block;font-size:15px}
 #progressor-home .ph-card p{font-size:14px;margin:4px 0 0}
-#progressor-home .ph-card .ph-mini{margin-top:10px;background:var(--pg-ink,#10131A);color:var(--pg-on-ink,#fff)}
+#progressor-home .ph-card-actions{display:flex;align-items:center;gap:14px;margin-top:10px}
+#progressor-home .ph-card-actions .ph-textlink{padding:0;margin-left:auto}
+#progressor-home .ph-foot{flex-wrap:wrap}
+#progressor-home .ph-card .ph-mini{background:var(--pg-ink,#10131A);color:var(--pg-on-ink,#fff)}
 #progressor-home .ph-week{background:var(--pg-surface,#F3F4F7);border-radius:20px;padding:14px 16px;margin-top:8px}
 #progressor-home .ph-week b{display:block;font-size:13px;color:var(--pg-muted,#6B7585);font-weight:600;margin-bottom:2px}
 #progressor-home .ph-week p{font-size:14px}
