@@ -318,13 +318,22 @@ def supply(db):
         trial=instant(user['starter_trial_until_utc']) if user.get('starter_trial_until_utc') else None
         entities.append(entity('profile:' + str(uid), user['tg_user_id'], 'profile.updated', instant(user['created_at']), timezone=tz, consent_given=bool(user['consent_given']),owner_consent=owner_consent[uid],paid_until=paid,access_basis='native_subscription',native_trial_until=trial))
     supplement_names = {r['id']: str(r['name_ru'] or r['name'] or '')[:160] for r in db.execute('SELECT id,name,name_ru FROM supplements')} if db.execute("SELECT 1 FROM sqlite_master WHERE name='supplements'").fetchone() else {}
+    # Planned clock time per supplement: its own time, else the time of its enabled slot.
+    planned = {}
+    tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('user_schedules','user_schedule_slots')")}
+    if tables == {'user_schedules', 'user_schedule_slots'} and {'slot_id', 'time_local', 'is_enabled'} <= {r['name'] for r in db.execute('PRAGMA table_info(user_schedule_slots)')}:
+        slot_times = {(r['user_id'], r['slot_id']): r['time_local'] for r in db.execute('SELECT user_id,slot_id,time_local FROM user_schedule_slots WHERE is_enabled=1')}
+        for r in db.execute('SELECT user_id,supplement_id,time_hhmm,slot_id FROM user_schedules WHERE is_enabled=1'):
+            clock = str(r['time_hhmm'] or slot_times.get((r['user_id'], r['slot_id'])) or '')
+            if len(clock) == 5 and clock[2] == ':' and clock[:2].isdecimal() and clock[3:].isdecimal() and int(clock[:2]) < 24 and int(clock[3:]) < 60:
+                planned[(r['user_id'], r['supplement_id'])] = clock
     for row in db.execute('SELECT * FROM user_supplements'):
         user = users.get(row['user_id'])
         if not user:
             continue
         active = bool(row['is_active'] and row['enabled'] and not row['user_frozen'])
         dose = str(row['dose_text'] or '')[:256] if 'dose_text' in row.keys() else ''
-        entities.append(entity('supplement:' + str(row['id']), user['tg_user_id'], 'supplement.started' if active else 'supplement.stopped', instant(row['created_at']), supplement_id=str(row['supplement_id']), name=supplement_names.get(row['supplement_id'],'Добавка'), active=active, reported_dose_text=dose, dose_known=False, dose_basis='unparsed_user_report; do_not_add_to_food_amounts'))
+        entities.append(entity('supplement:' + str(row['id']), user['tg_user_id'], 'supplement.started' if active else 'supplement.stopped', instant(row['created_at']), supplement_id=str(row['supplement_id']), name=supplement_names.get(row['supplement_id'],'Добавка'), active=active, scheduled_time=planned.get((row['user_id'], row['supplement_id'])), reported_dose_text=dose, dose_known=False, dose_basis='unparsed_user_report; do_not_add_to_food_amounts'))
     for row in db.execute('SELECT * FROM supplement_day_state'):
         user = users.get(row['user_id'])
         if not user:

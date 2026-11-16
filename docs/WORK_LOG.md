@@ -531,3 +531,15 @@ Evidence and limits are in the commit messages: Node suites and a desktop
 browser against canned answers only; Playwright, Linux Python suites on a
 workstation and physical Telegram devices were not run by the author. The
 coordinated updater ran each repository's own checks before switching.
+
+## 2026-11-16 — Water, repeat, biomachine index, two more link rules
+
+Home: water row (target +500 ml on a day with a recorded workout), one-tap
+repeat of a recent meal, low-stock line in the Supply sheet, and the day index
+renamed "биомашина" with a per-system breakdown sheet. `day_links`: `trained_today`,
+`protein_spread` (protein packed into one meal on most full days) and
+`slot_during_training` (an intake planned inside the usual training window);
+the Supply adapter now exposes `scheduled_time` per supplement when the schedule
+tables exist. Weight reconciliation was not changed; its existing tests pass.
+Evidence: Python suite (one known macOS-only updater failure), desktop browser
+harness. Not run on production data or a phone.

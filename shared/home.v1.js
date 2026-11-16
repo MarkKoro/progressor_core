@@ -9,7 +9,7 @@
   const icons = {
     play: 'M7 4v16l13-8z', ok: 'M5 12l5 5L20 7', down: 'M6 9l6 6 6-6', plus: 'M12 5v14M5 12h14', lock: 'M7 11V8a5 5 0 0 1 10 0v3M6 11h12v9H6z',
     cam: 'M5 7h3l2-3h4l2 3h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zM15.5 13a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0z',
-    mic: 'M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3', stop: 'M7 7h10v10H7z',
+    mic: 'M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3', stop: 'M7 7h10v10H7z', again: 'M4 12a8 8 0 1 0 2.6-5.9M4 4v5h5', drop: 'M12 3c3.5 4.2 6 7.3 6 10.5a6 6 0 0 1-12 0C6 10.3 8.5 7.2 12 3z',
     home: 'M5 4h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM15 4h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM5 14h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1zM15 14h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z',
     gym: 'M2 12h1M6 8H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2M6 7v10a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1H7a1 1 0 0 0-1 1zM9 12h6M15 7v10a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-1a1 1 0 0 0-1 1zM18 8h2a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2M22 12h-1',
     food: 'M5 21c.5-4.5 2.5-8 7-10M9 18c6.218 0 10.5-3.288 11-12V4h-4.014c-9 0-11.986 4-12 9 0 1 0 3 2 5h3z',
@@ -38,7 +38,7 @@
   }
 
   let session = null, generation = 0, busy = false;
-  const state = {gym: {status: 'loading'}, food: {status: 'loading'}, supply: {status: 'loading'}, relationship: null, gymFree: false, gymHint: null, links: null};
+  const state = {gym: {status: 'loading'}, food: {status: 'loading'}, supply: {status: 'loading'}, relationship: null, gymFree: false, gymHint: null, links: null, water: null};
   async function call(domain, path, body, options = {}) {
     // A product page can use the capture sheets before the home screen was ever opened.
     if (!session) session = await window.Progressor.renew();
@@ -74,6 +74,7 @@
       (allowed('gym') ? call('gym', '/day/start_hint') : Promise.resolve({ok: false})).then(v => { if (mine === generation) { state.gymHint = v.ok ? v.data : null; render(); } }),
       loadDomain('food', '/stats/today').then(v => { if (mine === generation) { state.food = v; render(); } }),
       loadDomain('supply', '/today').then(v => { if (mine === generation) { state.supply = v; render(); } }),
+      (allowed('food') ? call('food', '/water') : Promise.resolve({ok: false})).then(v => { if (mine === generation) { state.water = v.ok ? v.data : null; render(); } }),
       call('core', '/connections/links?target=' + source).then(v => { if (mine === generation) { state.links = v.ok ? v.data : null; render(); } }),
       call('core', '/connections/today?target=' + source).then(v => { if (mine === generation) { state.relationship = v.ok ? v.data?.relationship || null : null; render(); } })];
     await Promise.all(jobs);
@@ -236,6 +237,51 @@
   const gymKey = 'progressor.home.gym';
   // An unfinished free session wins; then what the person actually records (server history of
   // recent sessions with sets); with too little history, the last choice on this device; else the plan.
+  // Water: a counter for the diary day. A recorded workout today raises the yardstick by 500 ml.
+  const waterTarget = () => (state.water?.target_ml || 2000) + (state.links?.trained_today ? 500 : 0);
+  async function addWater(delta) {
+    if (busy) return;
+    busy = true;
+    const result = await call('food', '/water', {delta_ml: delta});
+    busy = false;
+    if (result.ok) { state.water = result.data; render(); document.dispatchEvent(new CustomEvent('progressor:water', {detail: result.data})); }
+    else toast('Не удалось записать воду. Повторите.');
+    return result.ok ? result.data : null;
+  }
+  // Repeat a recent meal: the saved composition is copied, no new estimate and no charge.
+  async function openRepeat() {
+    openSheet('food', h('h3', null, 'Повторить блюдо'), h('div', {class: 'ph-spin', role: 'status', 'aria-label': 'Загрузка'}));
+    const result = await call('food', '/meals/recent');
+    if (sheetKind !== 'food') return;
+    const items = result.ok ? result.data?.items || [] : [];
+    if (!items.length) { openSheet('food', h('h3', null, 'Повторить блюдо'), h('p', {class: 'ph-muted'}, result.ok ? 'Здесь появятся ваши последние блюда. Запишите первое по фото, голосом или текстом.' : 'Не удалось загрузить последние блюда. Повторите позже.')); return; }
+    let portion = 1, saving = false;
+    const note = h('p', {class: 'ph-muted', role: 'status'}, 'Состав берётся из сохранённой записи. Новый расчёт не нужен и не списывается.');
+    const portions = h('div', {class: 'ph-seg', role: 'group', 'aria-label': 'Размер порции'}, ...[[.5, '½'], [1, 'Как тогда'], [1.5, '×1,5'], [2, '×2']].map(([value, label]) =>
+      h('button', {type: 'button', 'aria-pressed': String(value === 1), onclick: e => { portion = value; for (const b of portions.children) b.setAttribute('aria-pressed', String(b === e.currentTarget)); }}, label)));
+    const pick = item => async () => {
+      if (saving) return;
+      saving = true; note.textContent = 'Записываем…';
+      const preview = await call('food', '/meals/recent/preview', {meal_id: item.id, portion});
+      const saved = preview.ok ? await call('food', '/meals/recent/confirm', {id: preview.data.id}) : preview;
+      saving = false;
+      if (!saved.ok) { note.textContent = (typeof saved.data?.detail === 'string' && saved.data.detail) || 'Не удалось повторить блюдо. Попробуйте ещё раз.'; return; }
+      closeSheet(); toast(`Записано: ${item.name.slice(0, 40)} · ${Math.round(item.totals.kcal * portion)} ккал`);
+      void load(); document.dispatchEvent(new CustomEvent('progressor:meal-recorded', {detail: {}}));
+    };
+    openSheet('food', h('h3', null, 'Повторить блюдо'), portions, note,
+      ...items.map(item => h('button', {type: 'button', class: 'ph-opt', onclick: pick(item)}, h('b', null, item.name), h('small', null, `${Math.round(item.totals.kcal)} ккал · белки ${Math.round(item.totals.protein)} г`))));
+  }
+  // The "biomachine" index: how completely today is read out, by system. No judgement, only coverage.
+  let machineParts = [];
+  function openMachine() {
+    const known = machineParts.filter(part => Number.isFinite(part.value));
+    openSheet('machine', h('h3', null, 'Биомашина'),
+      h('p', {class: 'ph-muted'}, 'У машины всё измерено и просчитано. Индекс показывает, насколько полно сегодня считаны ваши системы.'),
+      ...machineParts.map(part => h('div', {class: 'ph-sys'}, h('div', {class: 'ph-sys-head'}, h('b', null, part.title), h('span', null, part.locked ? 'не подключено' : Number.isFinite(part.value) ? Math.round(Math.min(part.value, 100)) + '%' : 'нет данных')),
+        h('div', {class: 'ph-sys-bar'}, h('i', {style: `width:${Number.isFinite(part.value) ? Math.max(0, Math.min(100, part.value)) : 0}%`})), h('small', null, part.text))),
+      h('p', {class: 'ph-muted'}, known.length < machineParts.length ? 'Чем больше систем подключено и записано, тем точнее картина.' : 'Все системы на связи.'));
+  }
   function gymChoice(hasPlan) {
     if (state.gymFree || !hasPlan) return 'free';
     const hint = state.gymHint;
@@ -270,7 +316,8 @@
           h('div', {class: 'ph-chips'}, ...slot.units.map(u => h('button', {type: 'button', class: 'ph-chip' + (u.taken ? ' on' : ''), 'aria-pressed': String(u.taken),
             onclick: async () => { if (!await setUnits([u], u.taken ? 'none' : 'taken')) toast('Не удалось сохранить отметку. Список обновлён.'); }},
             u.name, u.kind === 'complex' ? h('small', null, ` ${u.done}/${u.count}`) : null))));
-      }));
+      }),
+      (state.supply.data?.low_stock || []).length ? h('p', {class: 'ph-muted'}, 'Заканчивается: ' + state.supply.data.low_stock.slice(0, 3).map(x => `${x.name} (${x.days_left > 0 ? 'на ' + x.days_left + ' дн.' : 'закончилось'})`).join(', ')) : null);
   }
   // "Понятно" hides a card on this device for a week; the rule itself keeps running on the server.
   const hiddenKey = 'progressor.links.hidden';
@@ -352,12 +399,12 @@
   }
   function render() {
     if (!root || !opened) return;
-    const name = session?.user?.first_name, percents = [];
+    const name = session?.user?.first_name, percents = [], pct = {};
     const gym = tile('gym', 'gy', 'Зал', d => {
       const days = d.active_days || [], done = (d.completed_days || []).length;
       const next = days.find(x => x.day_index === d.suggested_day_index);
       const label = next ? next.label || 'День ' + next.day_index : null, choice = gymChoice(!!label);
-      percents.push(days.length ? done / days.length * 100 : NaN);
+      percents.push(pct.gym = days.length ? done / days.length * 100 : NaN);
       const start = kind => { try { localStorage.setItem(gymKey, kind); } catch {} closeSheet(); go({kind: kind === 'free' ? 'gym_free' : 'gym_today'}); };
       const choose = () => openSheet('gym', h('h3', null, 'Что сегодня?'),
         h('p', {class: 'ph-muted'}, state.gymHint?.sample >= 3 ? `Кнопка «Начать» выбирает то, что вы записываете чаще: по плану — ${state.gymHint.plan_sessions}, свободных — ${state.gymHint.free_sessions} из последних ${state.gymHint.sample}.` : 'Кнопка «Начать» запоминает ваш последний выбор, пока тренировок мало.'),
@@ -372,22 +419,33 @@
     const food = tile('food', 'fd', 'Еда', d => {
       const kcal = Math.round(d.totals?.kcal || 0), goal = d.goal?.kcal ? Math.round(d.goal.kcal) : null;
       const left = d.goal?.protein ? Math.max(0, Math.round(d.goal.protein - (d.totals?.protein || 0))) : null;
-      percents.push(goal ? kcal / goal * 100 : NaN);
+      percents.push(pct.food = goal ? kcal / goal * 100 : NaN);
       return h('div', {class: 'ph-tile fd'}, ring(goal ? kcal / goal * 100 : NaN), h('h2', null, 'Еда'),
         h('p', null, goal ? `${kcal} из ${goal} ккал` + (left !== null ? ` · белка ещё ${left} г` : '') : `${kcal} ккал · цель не задана`),
         h('div', {class: 'ph-btns'}, h('button', {type: 'button', class: 'ph-btn grow', onclick: startPhoto}, icon('cam'), 'Фото'),
-          h('button', {type: 'button', class: 'ph-btn ico', 'aria-label': 'Надиктовать, что вы съели', onclick: startVoice}, icon('mic'))),
+          h('button', {type: 'button', class: 'ph-btn ico', 'aria-label': 'Надиктовать, что вы съели', onclick: startVoice}, icon('mic')),
+          h('button', {type: 'button', class: 'ph-btn ico', 'aria-label': 'Повторить недавнее блюдо', onclick: openRepeat}, icon('again'))),
         goal ? null : h('button', {type: 'button', class: 'ph-textlink', onclick: () => go({kind: 'food_goal'})}, 'Задать цель'));
     });
     const supply = tile('supply', 'sp', 'БАДы', () => {
       const slots = supplySlots(), total = slots.reduce((n, s) => n + s.units.reduce((m, u) => m + u.count, 0), 0), done = slots.reduce((n, s) => n + s.units.reduce((m, u) => m + u.done, 0), 0);
       const next = slots.find(s => s.units.some(u => u.pending)), pending = next ? next.units.filter(u => u.pending) : [];
-      percents.push(total ? done / total * 100 : NaN);
+      percents.push(pct.supply = total ? done / total * 100 : NaN);
       const text = !total ? 'На сегодня приёмов нет' : next ? `${next.title} · ${pending.length} шт · принято ${done} из ${total}` : `Все ${total} отмечены`;
       return h('div', {class: 'ph-tile sp', role: 'button', tabindex: '0', onclick: openSupplySheet, onkeydown: e => { if (e.key === 'Enter') openSupplySheet(); }},
         ring(total ? done / total * 100 : NaN), h('div', {class: 'ph-grow'}, h('h2', null, 'БАДы'), h('p', null, text)),
         next ? h('button', {type: 'button', class: 'ph-btn', onclick: e => { e.stopPropagation(); takeUnits(pending, next.title); }}, icon('ok'), 'Принял') : null);
     });
+    const water = state.water && state.food.status === 'ready' ? state.water : null, waterGoal = waterTarget();
+    if (water) percents.push(water.ml / waterGoal * 100);
+    const partOf = (domain, title, text, value) => ({title, text, value, locked: state[domain].status === 'locked'});
+    machineParts = [partOf('food', 'Топливо', 'Питание: калории к цели дня', pct.food), partOf('gym', 'Нагрузка', 'Тренировки: выполнено из плана недели', pct.gym), partOf('supply', 'Поддержка', 'Добавки: отмечено из сегодняшних', pct.supply)];
+    if (water) machineParts.push({title: 'Вода', text: `Выпито ${water.ml} из ${waterGoal} мл`, value: water.ml / waterGoal * 100, locked: false});
+    const waterRow = water ? h('div', {class: 'ph-water'}, icon('drop'), h('div', {class: 'ph-grow'}, h('b', null, `Вода ${(water.ml / 1000).toLocaleString('ru-RU', {maximumFractionDigits: 2})} / ${(waterGoal / 1000).toLocaleString('ru-RU', {maximumFractionDigits: 1})} л`),
+        h('div', {class: 'ph-sys-bar'}, h('i', {style: `width:${Math.max(0, Math.min(100, water.ml / waterGoal * 100))}%`})), state.links?.trained_today ? h('small', null, '+0,5 л за тренировку') : null),
+      h('button', {type: 'button', class: 'ph-mini', 'aria-label': 'Убрать 250 миллилитров', disabled: water.ml <= 0, onclick: () => addWater(-250)}, '−'),
+      h('button', {type: 'button', class: 'ph-mini', 'aria-label': 'Добавить стакан, 250 миллилитров', onclick: () => addWater(250)}, '+250'),
+      h('button', {type: 'button', class: 'ph-mini', 'aria-label': 'Добавить 500 миллилитров', onclick: () => addWater(500)}, '+500')) : null;
     const known = percents.filter(Number.isFinite), index = known.length ? Math.round(known.reduce((a, b) => a + Math.min(b, 100), 0) / known.length) : null;
     // Cross-product links: rules computed by Core from the owner's own records.
     const cards = (state.links?.cards || []).filter(card => !hiddenCards().has(card.key)), shown = linksOpen ? cards : cards.slice(0, 2);
@@ -409,8 +467,8 @@
     body.classList.toggle('ph-settled', painted); painted = true;
     body.replaceChildren(
       h('header', null, h('h1', null, name ? 'Привет, ' + name : 'Сегодня'), h('div', {class: 'ph-head-right'}, streakChip,
-        h('div', {class: 'ph-idx', role: 'img', 'aria-label': index === null ? 'Данных за сегодня пока нет' : `День выполнен на ${index} процентов`}, h('b', null, index === null ? '—' : String(index)), h('span', null, 'день')))),
-      h('div', {class: 'ph-grid'}, gym, food, supply),
+        h('button', {type: 'button', class: 'ph-idx', 'aria-label': (index === null ? 'Данных за сегодня пока нет' : `Биомашина считана на ${index} процентов`) + '. Открыть разбор по системам', onclick: openMachine}, h('b', null, index === null ? '—' : String(index)), h('span', null, 'биомашина')))),
+      h('div', {class: 'ph-grid'}, gym, food, supply), waterRow,
       state.food.status === 'ready' ? h('button', {type: 'button', class: 'ph-ask', onclick: () => openAsk('')}, h('span', null, 'Спросить про свои данные'), h('i', {'aria-hidden': 'true'}, '→')) : null,
       restNote || link, weekBlock,
       h('div', {class: 'ph-foot'}, state.links ? h('button', {type: 'button', class: 'ph-textlink', onclick: toggleRest}, state.links.rest_active ? 'Закончить отдых' : 'Сегодня отдых') : null,
@@ -426,6 +484,15 @@
 #progressor-home.ph-closed{background:none;pointer-events:none;overflow:visible}#progressor-home.ph-closed .ph-body{display:none}
 #progressor-home .ph-shade,#progressor-home .ph-toast{pointer-events:auto}
 #progressor-home .ph-idx{background:var(--pg-ink,#10131A);color:var(--pg-on-ink,#fff);border-radius:16px;padding:8px 14px;text-align:center;line-height:1.1;flex:none}
+#progressor-home button.ph-idx{border:0;font:inherit;cursor:pointer}
+#progressor-home .ph-water{display:flex;align-items:center;gap:8px;background:var(--pg-surface,#F3F4F7);border-radius:18px;padding:12px;margin-top:10px}
+#progressor-home .ph-water .ph-i{width:22px;height:22px;flex:none;fill:none;stroke:#3D8BE0;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#progressor-home .ph-water b{font-size:14px;display:block}#progressor-home .ph-water small{font-size:12px;color:var(--pg-muted,#6B7585)}
+#progressor-home .ph-sys-bar{height:6px;border-radius:3px;background:var(--pg-line,#E6E9EF);overflow:hidden;margin:6px 0 2px}#progressor-home .ph-sys-bar i{display:block;height:100%;border-radius:3px;background:#3D8BE0}
+#progressor-home .ph-sys{margin-top:12px}#progressor-home .ph-sys-head{display:flex;justify-content:space-between;font-size:15px}#progressor-home .ph-sys small{font-size:12px;color:var(--pg-muted,#6B7585)}
+#progressor-home .ph-sys .ph-sys-bar i{background:var(--pg-ink,#10131A)}
+#progressor-home .ph-seg{display:flex;gap:6px;margin:4px 0 2px}#progressor-home .ph-seg button{flex:1;border:0;font:inherit;font-size:13px;padding:9px 4px;border-radius:12px;background:var(--pg-surface,#F3F4F7);color:var(--pg-text,#10131A);cursor:pointer}
+#progressor-home .ph-seg button[aria-pressed="true"]{background:var(--pg-ink,#10131A);color:var(--pg-on-ink,#fff)}
 #progressor-home .ph-idx b{display:block;font-size:20px}#progressor-home .ph-idx span{font-size:11px;opacity:.72}
 #progressor-home .ph-link ul{margin:6px 0 4px;padding-left:18px}#progressor-home .ph-link li{margin:3px 0;font-size:14px}
 #progressor-home .ph-opt{display:block;width:100%;text-align:left;border:0;font:inherit;background:var(--pg-surface,#F3F4F7);color:var(--pg-text,#10131A);border-radius:16px;padding:14px;margin-top:8px;cursor:pointer}
@@ -548,6 +615,8 @@
   window.Progressor.openHome = show;
   window.Progressor.closeHome = hide;
   window.Progressor.homeOpen = () => opened;
+  window.Progressor.water = {get: () => call('food', '/water').then(v => v.ok ? v.data : null), add: delta => { if (!root) build(); return addWater(delta); }};
+  window.Progressor.repeatMeal = () => { if (!root) build(); return openRepeat(); };
   // The same capture sheets serve a product page while the home screen is closed.
   window.Progressor.capture = {photo: () => { if (!root) build(); startPhoto(); }, voice: () => { if (!root) build(); return startVoice(); }, text: () => { if (!root) build(); textSheet(''); }};
   // First launch of this tab only; a cross-product arrival keeps its requested native screen.

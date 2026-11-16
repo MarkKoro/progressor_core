@@ -187,6 +187,31 @@ def build(data, entities, now, day, zone, rest_days=()):
                 f"В этот день недели вы обычно заканчиваете тренировку около {usual}:00, а последняя запись еды была " + ('давно' if latest else 'не сегодня') + '. Лёгкий приём за час-два до зала даст сил.',
                 {'kind': 'food_log', 'label': 'Записать еду'}, 12))
 
+    # Supply ↔ Gym: an intake scheduled inside the usual training window tends to be skipped.
+    if supply and len(sessions) >= 4 and sum(1 for stamp in sessions if stamp.weekday() == day.weekday()) >= 2:
+        usual = sorted(stamp.hour for stamp in sessions)[len(sessions) // 2]
+        for entity in entities:
+            payload = entity['payload']
+            clock = str(payload.get('scheduled_time') or '')
+            if entity['source'] == 'supply' and entity['entity_id'].startswith('supplement:') and payload.get('active') and len(clock) == 5 and clock[:2].isdecimal() and usual - 2 <= int(clock[:2]) < usual:
+                cards.append(_card('slot_during_training', ['supply', 'gym'], 'Приём попадает на тренировку',
+                    f"«{payload.get('name')}» запланирован на {clock}, а в этот день недели вы обычно заканчиваете тренировку около {usual}:00. Удобнее перенести приём на время после зала — так он не потеряется.",
+                    {'kind': 'supply_plan', 'label': 'Расписание'}, 41))
+                break
+
+    # Food: protein packed into one meal. Counted only on days with at least two recorded meals.
+    by_day = {}
+    for entity in entities:
+        payload = entity['payload']
+        if entity['source'] == 'food' and entity['entity_id'].startswith('meal:') and payload.get('source_local_date') in week:
+            by_day.setdefault(payload['source_local_date'], []).append(float((payload.get('macros') or {}).get('protein') or 0))
+    full = [meals for meals in by_day.values() if len(meals) >= 2 and sum(meals) >= 40]
+    packed = [meals for meals in full if max(meals) >= sum(meals) * .65]
+    if nutrition and len(full) >= 4 and len(packed) * 2 > len(full):
+        cards.append(_card('protein_spread', ['food'] + (['gym'] if activity else []), 'Белок собран в один приём',
+            f"В {len(packed)} из {len(full)} последних дней больше половины белка пришлось на один приём пищи. Мышцам удобнее, когда он распределён: примерно 25–40 г за раз, три-четыре раза в день.",
+            {'kind': 'open_food', 'label': 'Посмотреть питание'}, 46))
+
     # Supply ↔ Gym: a stimulant marked late in the day.
     if supply:
         late = next((e for e in entities if e['source'] == 'supply' and e['entity_id'].startswith('intake:') and e['payload'].get('status') == 'taken'
@@ -238,7 +263,7 @@ def build(data, entities, now, day, zone, rest_days=()):
         cards.append(_card(f'streak_{streak}', sorted(k for k, v in days.items() if v), f'{streak} дней подряд',
             'Серия держится на любом действии в любом разделе: тренировка, запись еды или отметка добавок.', None, 4))
     cards.sort(key=lambda card: (card['priority'], card['key']))
-    return {'schema_version': 1, 'day': day.isoformat(), 'cards': cards[:8], 'goal': goal if goal in GOAL_NAMES else None, 'goal_label': GOAL_NAMES.get(goal), 'streak': {'days': streak, 'today_recorded': day.isoformat() in any_day},
+    return {'schema_version': 1, 'day': day.isoformat(), 'cards': cards[:8], 'goal': goal if goal in GOAL_NAMES else None, 'goal_label': GOAL_NAMES.get(goal), 'streak': {'days': streak, 'today_recorded': day.isoformat() in any_day}, 'trained_today': day.isoformat() in days['gym'],
             'week': summary, 'coverage': 'Только ваши сохранённые записи. Оценки по еде — не анализы и не назначение.'}
 
 

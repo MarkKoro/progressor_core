@@ -298,7 +298,7 @@ class Integration(unittest.TestCase):
             with client.app.state.engine.store.connection() as db: before=db.execute("SELECT count(*) FROM recommendations").fetchone()[0]
             body = client.get('/api/v1/me/connections/links?target=food&user_id='+str(OTHER),headers={'X-Progressor-Auth':tokens['core']}).json()
             self.assertEqual(body['schema_version'],1)
-            self.assertEqual(set(body),{'schema_version','day','cards','streak','week','coverage','goal','goal_label','rest_active','preferences_revision'})
+            self.assertEqual(set(body),{'schema_version','day','cards','streak','week','coverage','goal','goal_label','rest_active','preferences_revision','trained_today'})
             with client.app.state.engine.store.connection() as db:
                 self.assertEqual(db.execute("SELECT count(*) FROM recommendations").fetchone()[0],before)
 

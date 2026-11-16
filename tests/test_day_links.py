@@ -130,6 +130,29 @@ class DayLinks(unittest.TestCase):
         self.assertEqual(result['week']['food_days'], 1)
         self.assertIn(result['week']['headline'], ('На этой неделе просели добавки.', 'На этой неделе просели тренировки.'))
 
+    def test_protein_packed_into_one_meal_needs_four_full_days_and_a_majority(self):
+        def meals(packed_days):
+            out = []
+            for offset in range(5):
+                day = (DAY - timedelta(days=offset)).isoformat()
+                split = (90, 10, 10) if offset < packed_days else (40, 35, 35)
+                out += [{'source': 'food', 'entity_id': f'meal:{offset}{i}', 'payload': {'source_local_date': day, 'macros': {'protein': p}}} for i, p in enumerate(split)]
+            return out
+        self.assertIn('protein_spread', keys(build(data(), meals(3), NOW, DAY, ZONE)))
+        self.assertNotIn('protein_spread', keys(build(data(), meals(2), NOW, DAY, ZONE)))
+        self.assertNotIn('protein_spread', keys(build(data(), meals(3)[:9], NOW, DAY, ZONE)))
+
+    def test_intake_planned_inside_the_usual_training_window_and_trained_today(self):
+        evenings = [{'source': 'gym', 'entity_id': f'workout:{i}', 'payload': {'completed_at': (datetime(2026, 11, 8, 17, tzinfo=timezone.utc) - timedelta(days=7 * i)).isoformat(), 'session_complete': True}} for i in range(4)]
+        def planned(clock, active=True):
+            return [{'source': 'supply', 'entity_id': 'supplement:1', 'payload': {'name': 'Магний', 'active': active, 'scheduled_time': clock}}]
+        self.assertIn('slot_during_training', keys(build(data(supplements=['Магний']), evenings + planned('19:00'), NOW, DAY, ZONE)))
+        for clock, active in (('21:00', True), ('08:00', True), ('19:00', False), (None, True)):
+            self.assertNotIn('slot_during_training', keys(build(data(supplements=['Магний']), evenings + planned(clock, active), NOW, DAY, ZONE)), (clock, active))
+        self.assertFalse(build(data(), evenings, NOW, DAY, ZONE)['trained_today'])
+        today = [{'source': 'gym', 'entity_id': 'workout:t', 'payload': {'completed_at': NOW.isoformat(), 'session_complete': True}}]
+        self.assertTrue(build(data(), today, NOW, DAY, ZONE)['trained_today'])
+
 
 if __name__ == '__main__':
     unittest.main()
