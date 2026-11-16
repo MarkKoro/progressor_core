@@ -187,6 +187,17 @@ def build(data, entities, now, day, zone, rest_days=()):
                 f"В этот день недели вы обычно заканчиваете тренировку около {usual}:00, а последняя запись еды была " + ('давно' if latest else 'не сегодня') + '. Лёгкий приём за час-два до зала даст сил.',
                 {'kind': 'food_log', 'label': 'Записать еду'}, 12))
 
+    # Gym ↔ Food: water. Only for people who record it, and only from the afternoon on.
+    drunk = {e['payload']['source_local_date']: e['payload']['water_ml'] for e in entities if e['source'] == 'food' and e['entity_id'].startswith('daily:')
+             and e['payload'].get('source_local_date') in week and type(e['payload'].get('water_ml')) is int}
+    recorded_water = [value for value in drunk.values() if value > 0]
+    if len(recorded_water) >= 2 and day.isoformat() in days['gym'] and local_now.hour >= 15 and drunk.get(day.isoformat(), 0) < 1500:
+        cards.append(_card('water_after_workout', ['gym', 'food'], 'После тренировки — вода',
+            f"Тренировка сегодня записана, а воды в дневнике {_number(drunk.get(day.isoformat(), 0) / 1000)} л. С потом уходит жидкость — стоит добрать до конца дня. Стакан отмечается в строке «Вода» выше.", None, 14))
+    elif len(recorded_water) >= 4 and sum(recorded_water) / len(recorded_water) < 1200:
+        cards.append(_card('water_low', ['food'], 'Воды в записях мало',
+            f"В дни, когда вы её отмечали, в среднем {_number(sum(recorded_water) / len(recorded_water) / 1000)} л. Возможно, не всё записано — стакан отмечается в одно касание в строке «Вода» выше.", None, 47))
+
     # Supply ↔ Gym: an intake scheduled inside the usual training window tends to be skipped.
     if supply and len(sessions) >= 4 and sum(1 for stamp in sessions if stamp.weekday() == day.weekday()) >= 2:
         usual = sorted(stamp.hour for stamp in sessions)[len(sessions) // 2]
@@ -251,7 +262,8 @@ def build(data, entities, now, day, zone, rest_days=()):
                'supply_days': len(days['supply'] & week_set) if supply is not None else None,
                'average_kcal': means.get('kcal') if nutrition and seven.get('logged_days') else None,
                'average_protein': means.get('protein') if nutrition and seven.get('logged_days') else None,
-               'target_kcal': targets.get('kcal'), 'target_protein': targets.get('protein')}
+               'target_kcal': targets.get('kcal'), 'target_protein': targets.get('protein'),
+               'average_water_ml': round(sum(recorded_water) / len(recorded_water)) if recorded_water else None}
     weakest = None
     scored = [(value / 7, name) for name, value in (('питание', summary['food_days']), ('добавки', summary['supply_days'])) if value is not None]
     if summary['workouts'] is not None:

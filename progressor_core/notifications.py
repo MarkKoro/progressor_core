@@ -73,6 +73,7 @@ def candidate(store,user_id,prefs,now=None,enabled_sources=None):
             line=f"Питание записано {week['food_days']} из 7 дней"
             if week.get('average_kcal') is not None:line+=f", в среднем {week['average_kcal']:g} ккал"+(f" при цели {week['target_kcal']:g}" if week.get('target_kcal') else '')+(f" и {week['average_protein']:g} г белка" if week.get('average_protein') is not None else '')
             parts.append(line+'.')
+        if week.get('average_water_ml'):parts.append(f"Воды в отмеченные дни — в среднем {week['average_water_ml']/1000:.1f} л.".replace('.',',',1))
         if week.get('supply_days') is not None:parts.append(f"Добавки отмечены {week['supply_days']} из 7 дней.")
         key='week_summary:'+local.strftime('%G-W%V')
         if parts and (week.get('food_days') or week.get('workouts') or week.get('supply_days')) and not store.hint_was_seen(user_id,'food',key):

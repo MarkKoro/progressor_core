@@ -461,7 +461,8 @@
     const week = state.links?.week, streak = state.links?.streak;
     const weekParts = week ? [week.workouts != null ? `тренировок ${week.workouts}` : null, week.food_days != null ? `питание ${week.food_days} из 7` : null, week.supply_days != null ? `добавки ${week.supply_days} из 7` : null].filter(Boolean) : [];
     const restNote = state.links?.rest_active ? h('div', {class: 'ph-week'}, h('b', null, 'Сегодня отдых'), h('p', null, 'Подсказки и напоминания на паузе до утра. Записи можно вести как обычно, серия сохранится.')) : null;
-    const weekBlock = weekParts.length ? h('div', {class: 'ph-week'}, h('b', null, 'Неделя' + (state.links?.goal_label ? ` · цель: ${state.links.goal_label}` : '')), h('p', null, weekParts.join(' · ')), week.headline ? h('p', {class: 'ph-muted'}, week.headline) : null) : null;
+    const weekBlock = weekParts.length ? h('div', {class: 'ph-week'}, h('b', null, 'Неделя' + (state.links?.goal_label ? ` · цель: ${state.links.goal_label}` : '')), h('p', null, weekParts.join(' · ')),
+      state.food.status === 'ready' ? h('button', {type: 'button', class: 'ph-textlink', onclick: () => go({kind: 'food_goal'})}, state.links?.goal_label ? 'Изменить цель' : 'Задать общую цель') : null, week.headline ? h('p', {class: 'ph-muted'}, week.headline) : null) : null;
     const streakChip = streak && streak.days > 0 ? h('div', {class: 'ph-streak' + (streak.today_recorded ? '' : ' wait'), role: 'img', 'aria-label': `Серия: ${streak.days} дн. подряд` + (streak.today_recorded ? '' : ', сегодня ещё нет записей')},
       h('b', null, String(streak.days)), h('span', null, streak.today_recorded ? 'дн. подряд' : 'серия ждёт')) : null;
     body.classList.toggle('ph-settled', painted); painted = true;

@@ -228,6 +228,10 @@ def food(db):
             group['observed_components'] += observation['coverage']['observed_components']
             group['assessed_components'] += observation['coverage']['total_components']
             group['qualities'] = sorted(set(group['qualities']) | {observation['source'] + ':' + observation['confidence']})
+    # Water belongs to the same diary day; only days that also have meals are projected.
+    water = {}
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='progressor_water'").fetchone():
+        water = {(r['user_id'], r['day']): r['ml'] for r in db.execute('SELECT user_id,day,ml FROM progressor_water') if type(r['ml']) is int and 0 <= r['ml'] <= 10000}
     for (uid, day), total in days.items():
         complete=False
         if db.execute("SELECT 1 FROM sqlite_master WHERE name='progressor_day_closure'").fetchone():
@@ -235,6 +239,7 @@ def food(db):
             versions=[[r[0],r[1]] for r in db.execute('SELECT id,version FROM meals WHERE user_id=? AND date=? ORDER BY id',(uid,day))]
             complete=bool(closure and json.loads(closure[0])==versions and versions)
         total['day_complete']=complete
+        total['water_ml']=water.get((uid,day))
         entities.append(entity('daily:' + str(uid) + ':' + day, uid, 'daily_nutrition.updated', local_day_instant(day, tz), source_local_date=day, timezone=tz, timestamp_basis='legacy_local_day', coverage='logged_meals_only', **total))
     for row in db.execute('SELECT g.* FROM goals g JOIN users u ON u.telegram_id=g.user_id'):
         targets = {key: number(row[key]) for key in ('kcal', 'protein', 'fat', 'carbs')}

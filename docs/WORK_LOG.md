@@ -543,3 +543,7 @@ the Supply adapter now exposes `scheduled_time` per supplement when the schedule
 tables exist. Weight reconciliation was not changed; its existing tests pass.
 Evidence: Python suite (one known macOS-only updater failure), desktop browser
 harness. Not run on production data or a phone.
+
+Later the same day: the Food adapter projects `water_ml` on diary days with meals;
+`day_links` adds `water_after_workout`, `water_low` and `week.average_water_ml`, which the
+Sunday summary quotes. Home: a goal button in the week block.

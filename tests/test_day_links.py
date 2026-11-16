@@ -153,6 +153,21 @@ class DayLinks(unittest.TestCase):
         today = [{'source': 'gym', 'entity_id': 'workout:t', 'payload': {'completed_at': NOW.isoformat(), 'session_complete': True}}]
         self.assertTrue(build(data(), today, NOW, DAY, ZONE)['trained_today'])
 
+    def test_water_rules_only_for_people_who_record_water(self):
+        def daily(offset, ml):
+            d = (DAY - timedelta(days=offset)).isoformat()
+            return {'source': 'food', 'entity_id': 'daily:1:' + d, 'payload': {'source_local_date': d, 'logged_meal_count': 2, 'water_ml': ml}}
+        today = [{'source': 'gym', 'entity_id': 'workout:t', 'payload': {'completed_at': NOW.isoformat(), 'session_complete': True}}]
+        logged = [daily(1, 2000), daily(2, 1800), daily(0, 500)]
+        self.assertIn('water_after_workout', keys(build(data(), today + logged, NOW, DAY, ZONE)))
+        self.assertNotIn('water_after_workout', keys(build(data(), today + logged, NOW.replace(hour=6), DAY, ZONE)))
+        self.assertNotIn('water_after_workout', keys(build(data(), today + [daily(0, None), daily(1, None)], NOW, DAY, ZONE)))
+        self.assertNotIn('water_after_workout', keys(build(data(), today + [daily(1, 2000), daily(2, 1800), daily(0, 1600)], NOW, DAY, ZONE)))
+        low = build(data(), [daily(i, 800) for i in range(1, 5)], NOW, DAY, ZONE)
+        self.assertIn('water_low', keys(low))
+        self.assertEqual(low['week']['average_water_ml'], 800)
+        self.assertIsNone(build(data(), [], NOW, DAY, ZONE)['week']['average_water_ml'])
+
 
 if __name__ == '__main__':
     unittest.main()
