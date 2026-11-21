@@ -66,7 +66,7 @@ function harness({ignoreAbort=false}={}){
  const descendants=n=>[n,...n.children.flatMap(descendants)];
  const findButton=text=>descendants(document.body).find(n=>n.tagName==='button'&&n.textContent===text);
  const note=()=>document.body.querySelector('#progressor-source-readiness-supply');
- const input=()=>descendants(document.body).find(n=>n.tagName==='label'&&n.textContent==='Supply участвует в связях').querySelector('input');
+ const input=()=>descendants(document.body).find(n=>n.tagName==='label'&&n.textContent==='Раздел «БАДы» участвует в связях').querySelector('input');
  const toggle=checked=>{input().checked=checked;void input().dispatchEvent({type:'change'});};
  const flush=async()=>{for(let i=0;i<6;i++)await new Promise(resolve=>setImmediate(resolve));};
  const take=(method='GET',suffix='')=>{const index=requests.findIndex(r=>r.options.method===method&&r.url==='/progressor/api/v1/me/connections'+suffix);assert.ok(index>=0,'expected request '+method+' '+suffix);return requests.splice(index,1)[0];};

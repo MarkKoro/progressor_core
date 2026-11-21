@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const source=document.currentScript?.dataset.progressorSource;
-  const names={food:'Food',gym:'Gym Diary',supply:'Supply'};
+  const names={food:'Еда',gym:'Тренировки',supply:'БАДы'};
   let dialog,content,notice,opener,current,busy=false,todayReload,viewGeneration=0,settingsRequest=0,openRequest=0,disposeReadiness,preferenceFields=new Map(),ownedAction;
   const el=(tag,text,parent)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(parent)parent.append(n);return n;};
   async function api(path,body,signal){
@@ -150,7 +150,7 @@
         else if(state!=='current'||!knownStatuses.has(item?.status)||typeof item.label!=='string'||!item.label||typeof item.message!=='string')row.note.textContent='Сейчас не удалось проверить участие данных. Обновите обзор дня.';
         else{
           el('span','Сейчас: '+item.label,row.note);
-          if(item.status!=='ready')el('span',item.status==='consent_required'?'Откройте Supply в боте и подтвердите актуальные условия и политику конфиденциальности.':item.message,row.note);
+          if(item.status!=='ready')el('span',item.status==='consent_required'?'Откройте раздел «БАДы» в боте и подтвердите актуальные условия и политику конфиденциальности.':item.message,row.note);
         }
       }
     };
@@ -161,7 +161,7 @@
     el('small','Галочки — ваш сохранённый выбор. Участие данных сейчас показано отдельно.',connections);
     const sources={};for(const s of ['food','gym','supply']){
       const row=el('div',undefined,connections);row.className='link-source';
-      const check=sources[s]=toggle(names[s]+' участвует в связях',row,p.sources[s]);
+      const check=sources[s]=toggle('Раздел «'+names[s]+'» участвует в связях',row,p.sources[s]);
       const note=el('small','Проверяем…',row);note.id='progressor-source-readiness-'+s;note.dataset.sourceReadiness=s;
       check.setAttribute('aria-describedby',note.id);readiness.set(s,{check,note});
       note.style.boxSizing='border-box';
@@ -174,7 +174,7 @@
     disposeReadiness=()=>{window.removeEventListener('resize',invalidateReservation);document.fonts?.removeEventListener('loadingdone',invalidateReservation);clearReservation();};
     const hints=toggle('Подсказки в приложениях',connections,p.hints);
     const notifications=toggle('Обычные напоминания во всех продуктах',connections,p.notifications);
-    const weight=toggle('Food напоминает проверить цель после нового веса Supply',connections,p.weight_notifications);
+    const weight=toggle('Напоминать проверить цель питания после нового веса в разделе «БАДы»',connections,p.weight_notifications);
     const goal=toggle('Предлагать связанные действия после смены цели',connections,p.goal_links);
     const frequency=el('label','Частота подсказок ',connections);const select=el('select',undefined,frequency);
     for(const [v,t] of [['normal','Обычная'],['quiet','Меньше подсказок']]){const o=el('option',t,select);o.value=v;}select.value=p.frequency;
@@ -182,14 +182,14 @@
     preference('frequency',()=>select.value,value=>{select.value=value;});
     button('Сохранить связи',connections,()=>save({sources:Object.fromEntries(Object.entries(sources).map(([s,n])=>[s,n.checked])),hints:hints.checked,notifications:notifications.checked,weight_notifications:weight.checked,goal_links:goal.checked,frequency:select.value}));
     const weekly=section('Один план питания в неделю',content);
-    const weeklyOn=toggle('Присылать недельную сводку в Food',weekly,p.weekly_plan);
+    const weeklyOn=toggle('Присылать недельную сводку в боте «Еда»',weekly,p.weekly_plan);
     const weeklyDay=el('select',undefined,weekly);weeklyDay.setAttribute('aria-label','День сводки');
     for(const [v,t] of [['monday','Понедельник'],['sunday','Воскресенье']]){const o=el('option',t,weeklyDay);o.value=v;}weeklyDay.value=p.weekly_day;
     const hour=el('select',undefined,weekly);hour.setAttribute('aria-label','Час по вашему времени');for(let h=8;h<=20;h++){const o=el('option',String(h).padStart(2,'0')+':00',hour);o.value=h;}hour.value=p.weekly_hour;
     preference('weekly_plan',()=>weeklyOn.checked,value=>{weeklyOn.checked=value;});
     preference('weekly_day',()=>weeklyDay.value,value=>{weeklyDay.value=value;});
     preference('weekly_hour',()=>Number(hour.value),value=>{hour.value=value;});
-    el('small','По умолчанию понедельник, 10:00, по часовому поясу уведомлений Food. Всего одно сообщение за неделю; при отдыхе оно не отправляется. Подтверждение полноты дня добровольное.',weekly);
+    el('small','По умолчанию понедельник, 10:00, по часовому поясу уведомлений раздела «Еда». Всего одно сообщение за неделю; при отдыхе оно не отправляется. Подтверждение полноты дня добровольное.',weekly);
     button('Сохранить время сводки',weekly,()=>save({weekly_plan:weeklyOn.checked,weekly_day:weeklyDay.value,weekly_hour:Number(hour.value)}));
     button('Предпросмотр моей недели',weekly,async()=>{const v=await api('/weekly-plan');weekly.querySelector('[data-plan-preview]')?.remove();const box=el('p',v.text,weekly);box.dataset.planPreview='';box.style.whiteSpace='pre-line';});
     const rhythm=section('Питание по привычным дням тренировок',content),r=current.rhythm;
@@ -197,11 +197,11 @@
     if(r.active){el('p','Ритм подтверждён. Общая сумма калорий за неделю сохранена. При смене цели, системы тренировок, отключении связи или окончании срока вернётся обычная цель.',rhythm);actionButton('Вернуться к одинаковой цели каждый день',rhythm,()=>({action:'rhythm_off'}),'Возвращена одинаковая цель каждый день.');}
     else if(r.proposal.status==='proposal'){
       const labels=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];el('p','Повторяются: '+r.proposal.weekdays.map(d=>labels[d]).join(', ')+'. Это предварительное наблюдение за двумя неделями.',rhythm);
-      for(const plan of r.proposal.previews){const box=el('div',undefined,rhythm);el('p',plan.training_extra_kcal===0?'Подтвердить ритм без изменения КБЖУ':`В день тренировки +${plan.training_extra_kcal} ккал; в остальные дни меньше на ту же недельную сумму. Белок и жиры остаются прежними.`,box);el('small',plan.days.map((d,i)=>labels[i]+': '+Math.round(d.kcal)+' ккал').join(' · '),box);actionButton('Подтвердить этот вариант на 28 дней',box,()=>({action:'rhythm',fingerprint:r.proposal.fingerprint,base_goal_key:r.proposal.base_goal_key,extra:plan.training_extra_kcal}),'Ритм подтверждён. Food применит выбранный вариант после синхронизации. Недельная сумма сохранена.');}
+      for(const plan of r.proposal.previews){const box=el('div',undefined,rhythm);el('p',plan.training_extra_kcal===0?'Подтвердить ритм без изменения КБЖУ':`В день тренировки +${plan.training_extra_kcal} ккал; в остальные дни меньше на ту же недельную сумму. Белок и жиры остаются прежними.`,box);el('small',plan.days.map((d,i)=>labels[i]+': '+Math.round(d.kcal)+' ккал').join(' · '),box);actionButton('Подтвердить этот вариант на 28 дней',box,()=>({action:'rhythm',fingerprint:r.proposal.fingerprint,base_goal_key:r.proposal.base_goal_key,extra:plan.training_extra_kcal}),'Ритм подтверждён. Раздел «Еда» применит выбранный вариант после синхронизации. Недельная сумма сохранена.');}
     }
     const atlas=section('Найти нутриент в еде',content);
     const clock=section('Проверить часовой пояс напоминаний',content);
-    el('p','Проверьте местное время перед сохранением. Настройка применяется к '+names[source]+'. История не переносится на другие даты.',clock);
+    el('p','Проверьте местное время перед сохранением. Настройка применяется к разделу «'+names[source]+'». История не переносится на другие даты.',clock);
     const tzSelect=el('select',undefined,clock);tzSelect.setAttribute('aria-label','Новый часовой пояс');
     const zones=['UTC','Europe/Moscow','Asia/Bangkok','Europe/London','Europe/Berlin','Asia/Dubai','Asia/Tokyo','America/New_York','America/Los_Angeles','Australia/Sydney'];
     const detected=Intl.DateTimeFormat().resolvedOptions().timeZone;if(detected&&!zones.includes(detected))zones.push(detected);
@@ -236,7 +236,7 @@
     }
     el('small',current.weight.explanation,profile);
     const coach=section('Что видит мой тренер',content);el('p',current.coach.explanation,coach);
-    if(!current.coach.items.length)el('p','Сначала подтвердите связь с тренером в Gym Diary.',coach);
+    if(!current.coach.items.length)el('p','Сначала подтвердите связь с тренером в разделе «Тренировки».',coach);
     for(const item of current.coach.items){
       const row=el('div',undefined,coach);el('strong',item.label,row);
       const macros=toggle('Разрешить дневные КБЖУ',row,item.macros);const dishes=toggle('Отдельно разрешить пять частых блюд',row,item.top_dishes);
@@ -248,17 +248,17 @@
     }
     const overview=section('Моя неделя',content);button('Показать недельный обзор',overview,async()=>{
       const v=await api('/weekly');overview.querySelector('[data-week]')?.remove();const box=el('div',undefined,overview);box.dataset.week='';
-      if(v.nutrition){const n=v.nutrition,a=n.averages_on_logged_days;el('p',`Food: ${n.logged_days} записанных дней из 7. В среднем по ним: ${a.kcal??'—'} ккал; Б ${a.protein??'—'}, Ж ${a.fat??'—'}, У ${a.carbs??'—'} г.`,box);}
-      if(v.workouts)el('p',`Gym Diary: ${v.workouts.recorded_sessions} сессий, ${v.workouts.completed_sessions} завершены; рабочих подходов ${v.workouts.working_sets}.`,box);
-      if(v.supply)el('p',`Supply: ${v.supply.active_supplements} активных добавок; отметок приёма за неделю ${v.supply.recorded_intakes}.`,box);
+      if(v.nutrition){const n=v.nutrition,a=n.averages_on_logged_days;el('p',`Еда: ${n.logged_days} записанных дней из 7. В среднем по ним: ${a.kcal??'—'} ккал; Б ${a.protein??'—'}, Ж ${a.fat??'—'}, У ${a.carbs??'—'} г.`,box);}
+      if(v.workouts)el('p',`Тренировки: ${v.workouts.recorded_sessions} сессий, ${v.workouts.completed_sessions} завершены; рабочих подходов ${v.workouts.working_sets}.`,box);
+      if(v.supply)el('p',`БАДы: ${v.supply.active_supplements} активных добавок; отметок приёма за неделю ${v.supply.recorded_intakes}.`,box);
       if(!v.nutrition&&!v.workouts&&!v.supply)el('p','Для обзора нужны свежие данные и доступ к выбранным продуктам.',box);el('small',v.coverage,box);
     });
     const help=section('Как это работает',content);for(const item of current.help){const d=section(item.title,help);el('p',item.text,d);}
     if(source==='supply'){
       const anchors=section('Напоминать о приёме после еды',content);
-      el('p','Добровольная связь Food и Supply. Вы выбираете конкретный приём; при отсутствии записи еды остаётся обычное расписание.',anchors);
+      el('p','Добровольная связь разделов «Еда» и «БАДы». Вы выбираете конкретный приём; при отсутствии записи еды остаётся обычное расписание.',anchors);
       button('Выбрать приём',anchors,async()=>{
-        const r=await fetch('/supply/api/integrations/meal-anchors',{cache:'no-store'});if(!r.ok)throw new Error('Расписание Supply временно недоступно');const v=await r.json();
+        const r=await fetch('/supply/api/integrations/meal-anchors',{cache:'no-store'});if(!r.ok)throw new Error('Расписание БАДов временно недоступно');const v=await r.json();
         anchors.querySelector('[data-meal-anchors]')?.remove();const box=el('div',undefined,anchors);box.dataset.mealAnchors='';
         if(!v.items.length)el('p','Сначала добавьте добавку и настройте время приёма.',box);
         for(const item of v.items){el('strong',item.name,box);el('small',item.note,box);for(const slot of item.slots){
@@ -269,7 +269,7 @@
       const overlap=section('Состав добавок и возможные пересечения',content);
       el('p','Проверяем ваш активный план и вещества с подтверждённой этикетки. Дозы и расписание сохраняются.',overlap);
       button('Проверить мой план',overlap,async()=>{
-        const response=await fetch('/supply/api/integrations/supplements',{cache:'no-store'});if(!response.ok)throw new Error('Проверка Supply временно недоступна');const v=await response.json();
+        const response=await fetch('/supply/api/integrations/supplements',{cache:'no-store'});if(!response.ok)throw new Error('Проверка БАДов временно недоступна');const v=await response.json();
         overlap.querySelector('[data-overlap]')?.remove();const box=el('div',undefined,overlap);box.dataset.overlap='';
         for(const w of v.warnings)el('p',w.message,box);
         if(!v.warnings.length)el('p','Подтверждённых пересечений не найдено. Неизвестный состав не означает отсутствие пересечения.',box);

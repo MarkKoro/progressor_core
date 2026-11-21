@@ -45,7 +45,7 @@ async function main(){
  try{
   await run('cross-purpose-ready-return-reload',async()=>{
    const t=await create(browser);assert.equal(await t.page.locator('#progressor-transfer').isHidden(),true);await t.page.locator('[data-primary]').click();await t.page.waitForURL(origin+routes.food+'*');await t.page.waitForFunction(()=>window.nativeActions.some(a=>a.kind==='food_goal'));
-   assert.deepEqual(await t.page.evaluate(()=>window.nativeActions),[{kind:'food_goal'}]);assert.equal(await t.page.locator('[data-progressor-return]').textContent(),'Вернуться в Gym Diary');
+   assert.deepEqual(await t.page.evaluate(()=>window.nativeActions),[{kind:'food_goal'}]);assert.equal(await t.page.locator('[data-progressor-return]').textContent(),'Вернуться в раздел «Тренировки»');
    assert.equal(new URL(t.page.url()).search,'');const stored=await t.page.evaluate(()=>sessionStorage.getItem('progressor.transfer.v1'));assert.ok(!stored.includes(auth.launchData));assert.ok(!stored.includes('assertions'));
    await t.page.reload();await t.page.locator('[data-progressor-return]').waitFor();assert.deepEqual(await t.page.evaluate(()=>window.nativeActions),[]);
    await t.page.locator('[data-progressor-return]').click();await t.page.waitForURL(origin+routes.gym+'*');await t.page.waitForFunction(()=>window.nativeActions.some(a=>a.restore==='today'));assert.equal(await t.page.evaluate(()=>sessionStorage.getItem('progressor.transfer.v1')),null);

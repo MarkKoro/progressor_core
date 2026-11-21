@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from .access import active_until, entitlements
 from .contracts import SOURCES, subject
 
-NAMES = {'gym': 'Gym Diary', 'food': 'Food', 'supply': 'Supply'}
+NAMES = {'gym': 'Тренировки', 'food': 'Еда', 'supply': 'БАДы'}
 
 
 def subscription_view(store, user_id, enabled_sources=SOURCES, now=None):

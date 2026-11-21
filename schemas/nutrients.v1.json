@@ -34,15 +34,15 @@
       "unit": "g"
     },
     "epa": {
-      "name": "EPA",
+      "name": "ЭПК (омега-3)",
       "unit": "mg"
     },
     "dha": {
-      "name": "DHA",
+      "name": "ДГК (омега-3)",
       "unit": "mg"
     },
     "ala": {
-      "name": "ALA",
+      "name": "АЛК (омега-3)",
       "unit": "g"
     },
     "cholesterol": {
@@ -114,7 +114,7 @@
       "unit": "mg"
     },
     "vitamin_a_rae": {
-      "name": "Витамин A (RAE)",
+      "name": "Витамин A (ретиноловый эквивалент)",
       "unit": "ug"
     },
     "retinol": {
@@ -150,7 +150,7 @@
       "unit": "ug"
     },
     "folate_dfe": {
-      "name": "Фолат (DFE)",
+      "name": "Фолат (пищевой эквивалент)",
       "unit": "ug"
     },
     "folic_acid": {

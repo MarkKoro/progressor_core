@@ -547,3 +547,20 @@ harness. Not run on production data or a phone.
 Later the same day: the Food adapter projects `water_ml` on diary days with meals;
 `day_links` adds `water_after_workout`, `water_low` and `week.average_water_ml`, which the
 Sunday summary quotes. Home: a goal button in the week block.
+
+## 2026-11-21 — Russian-only user-facing text across Core, Food, Gym and Supply
+
+Every text a person can see in the shared Mini App and in the three bots is now
+Russian. Product names inside sentences use the menu names «Еда», «Тренировки»,
+«БАДы» (Core NAMES maps, shared JS, progressor_bot.py mirrors, notices); the
+brand "Progressor" stays. Premium/Starter/Pay-as-you-go/AI Coach/BodyMap/WebApp/
+email/Stars/RUB/YooKassa/HH:MM wording translated. Nutrient display names
+EPA/DHA/ALA/RAE/DFE translated identically in schemas/nutrients.v1.json,
+shared/food_sources.py and all three mirrors (codes unchanged). English HTTP
+error details are translated; internal error codes stay unchanged and are mapped
+to Russian only at the response boundary (Gym, Supply backend handlers) or in the
+Supply toast. Seeded exercise names (e.g. "Меткон — AMRAP", "(Snatch)") are DB
+and logic keys and were deliberately left for a separate migration.
+Evidence: Linux suites on the server with temporary databases — Core 501,
+Food 220, Gym 268, Supply 125, all OK; Node connection_readiness (59) and
+journey_navigation pass. Playwright UI suites and physical devices were not run.

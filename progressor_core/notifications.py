@@ -49,13 +49,13 @@ def candidate(store,user_id,prefs,now=None,enabled_sources=None):
         hint=next((h for h in c['hints'] if h['key']=='workout_today.v1'),None)
         if fresh and hint and unseen(hint) and not any(w.get('session_complete') is False for w in workouts) and c.get('workout_follow_up') not in ('food_day_confirmed','food_recorded_after_workout'):
             day=(c.get('nutrition') or {}).get('today') or {};remaining=day.get('remaining_to_personal_goal')
-            text='Тренировка записана в Gym. '
+            text='Тренировка записана. '
             if remaining:
-                text+=f"До вашей текущей цели в журнале Food осталось: {remaining['kcal']:g} ккал; белки {remaining['protein']:g} г, жиры {remaining['fat']:g} г, углеводы {remaining['carbs']:g} г. "
+                text+=f"До вашей текущей цели в дневнике питания осталось: {remaining['kcal']:g} ккал; белки {remaining['protein']:g} г, жиры {remaining['fat']:g} г, углеводы {remaining['carbs']:g} г. "
             elif not (c.get('nutrition') or {}).get('targets'):
-                text+='Задайте свою цель питания в Food, чтобы сравнивать её с записями. '
+                text+='Задайте свою цель питания в разделе «Еда», чтобы сравнивать её с записями. '
             else:
-                text+='Сегодня в Food ещё нет записанных блюд. Проверьте полноту дневника. '
+                text+='Сегодня в дневнике питания ещё нет записанных блюд. Проверьте полноту дневника. '
             text+='Это разница с вашей целью по записанным блюдам, а не назначение дополнительной еды. Обычная активность уже может входить в цель.'
             estimates=[w.get('energy_estimate') for w in fresh]
             if all(estimates):

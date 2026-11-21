@@ -49,15 +49,15 @@ def recent(store,user_id,now=None,*,snapshot=None):
         rows=[dict(r) for r in db.execute('SELECT * FROM connection_changes WHERE user_id=? AND observed_at>? AND observed_at<=? ORDER BY observed_at DESC LIMIT 100',(uid,(now-timedelta(days=7)).timestamp(),cutoff))
               if r['source'] in allowed and (r['source']!='supply' or opened_at is None or r['observed_at']>=opened_at)]
     result=[]
-    names={'food':'Food','gym':'Gym Diary','supply':'Supply'}
+    names={'food':'«Еда»','gym':'«Тренировки»','supply':'«БАДы»'}
     for row in rows[:12]:
         p=json.loads(row.pop('body'));row['details']=p
-        if row['kind']=='weight':text=f"Вес в Supply изменён: {p['before'] if p['before'] is not None else 'не указан'} → {p['after']:g} кг."
-        elif row['kind']=='goal':text='Личная цель КБЖУ изменена в Food.'
-        elif row['kind']=='supplement':text=f"Supply: {p['name']} — "+('включён приём.' if p['after_active'] else 'приём выключен.')
-        elif row['kind']=='timezone':text=f"Часовой пояс {names[row['source']]}: {p['before']} → {p['after']}."
-        elif row['kind']=='food':text='Food: изменились записанные КБЖУ за '+str(p.get('date') or 'день')+'. Это может быть новая еда или исправление записи.'
-        else:text=(f"Записанная нагрузка Gym Diary изменена: подходов {p['before_sets']} → {p['after_sets']}." if p['before_sets'] is not None else f"Gym Diary: сохранена тренировка, рабочих подходов {p['after_sets']}.")
+        if row['kind']=='weight':text=f"Вес в разделе «БАДы» изменён: {p['before'] if p['before'] is not None else 'не указан'} → {p['after']:g} кг."
+        elif row['kind']=='goal':text='Личная цель КБЖУ изменена в разделе «Еда».'
+        elif row['kind']=='supplement':text=f"БАДы: {p['name']} — "+('включён приём.' if p['after_active'] else 'приём выключен.')
+        elif row['kind']=='timezone':text=f"Часовой пояс в разделе {names[row['source']]}: {p['before']} → {p['after']}."
+        elif row['kind']=='food':text='Еда: изменились записанные КБЖУ за '+str(p.get('date') or 'день')+'. Это может быть новая еда или исправление записи.'
+        else:text=(f"Записанная нагрузка в разделе «Тренировки» изменена: подходов {p['before_sets']} → {p['after_sets']}." if p['before_sets'] is not None else f"Тренировки: сохранена тренировка, рабочих подходов {p['after_sets']}.")
         result.append({**row,'text':text})
     return {'items':result,'message':'Изменения в ваших записях за неделю. Совпадение по времени не устанавливает причину самочувствия.'}
 
@@ -88,11 +88,11 @@ def hints(store,user_id,target,now=None,*,snapshot=None,changes=None,enabled_sou
         elif item['kind']=='goal' and policy['goal_links'] and target in ('gym','supply'):
             # A saved workout/intake proves that action, not a plan review.
             # Explicit review receipts are filtered separately by context.
-            title='Новая цель питания';message='В Food изменена цель. Можно сверить ваш план в '+('Gym Diary: сохраняйте силовые, а посильную аэробную активность выбирайте по самочувствию. Упражнения автоматически не меняются.' if target=='gym' else 'Supply. Добавки для похудения не назначаем по смене цели; проверьте уже выбранные вами приёмы.')
+            title='Новая цель питания';message='В разделе «Еда» изменена цель. Можно сверить ваш план в '+('разделе «Тренировки»: сохраняйте силовые, а посильную аэробную активность выбирайте по самочувствию. Упражнения автоматически не меняются.' if target=='gym' else 'разделе «БАДы». Добавки для похудения не назначаем по смене цели; проверьте уже выбранные вами приёмы.')
         else:continue
         key='change_'+item['kind']+'.v1';delivery=key+':'+item['id']
         result.append({'key':key,'targets':[target],'priority':12,'rule_version':1,'delivery':'inline_only',
-            'delivery_key':delivery,'reviewable':True,'title':title,'message':message,'action':{'kind':'food_goal' if target=='food' else 'gym_plan' if target=='gym' else 'supply_plan','label':'Проверить цель Food' if target=='food' else 'Мой план тренировок' if target=='gym' else 'Мои приёмы'},
+            'delivery_key':delivery,'reviewable':True,'title':title,'message':message,'action':{'kind':'food_goal' if target=='food' else 'gym_plan' if target=='gym' else 'supply_plan','label':'Проверить цель питания' if target=='food' else 'Мой план тренировок' if target=='gym' else 'Мои приёмы'},
             'basis':[{'source':item['source'],'event_id':item['details']['event_id']}],
             'details':item['text']+' Личные цели и записи меняются только обычным подтверждённым действием в своём продукте.'})
         break

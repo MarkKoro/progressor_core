@@ -149,18 +149,18 @@
   }
   function activityText(activity) {
     if (!activity) return '';
-    if (activity.reason === 'workout_recorded') return `Gym: тренировочных записей — ${activity.recorded_session_count ?? activity.completed_workout_count}, из них завершённых занятий — ${activity.completed_workout_count}. День Food: ${activity.date} (${activity.day_timezone}).`;
-    if (activity.reason === 'no_completed_workout_recorded') return `Gym: за ${activity.date} завершённая тренировка пока не отмечена.`;
-    if (activity.reason === 'missing_gym_membership') return 'Данных Gym пока нет. Отмечайте завершение тренировки в разделе «Тренировки».';
-    return 'Данные Gym временно недоступны. Питание можно записывать как обычно.';
+    if (activity.reason === 'workout_recorded') return `Тренировки: записей — ${activity.recorded_session_count ?? activity.completed_workout_count}, из них завершённых занятий — ${activity.completed_workout_count}. День в разделе «Еда»: ${activity.date} (${activity.day_timezone}).`;
+    if (activity.reason === 'no_completed_workout_recorded') return `Тренировки: за ${activity.date} завершённая тренировка пока не отмечена.`;
+    if (activity.reason === 'missing_gym_membership') return 'Данных о тренировках пока нет. Отмечайте завершение тренировки в разделе «Тренировки».';
+    return 'Данные раздела «Тренировки» временно недоступны. Питание можно записывать как обычно.';
   }
   function nutritionText(context) {
     const seven = context.nutrition?.history?.['7'];
-    if (!seven) return 'Данные Food временно недоступны. Остальные функции продолжают работать.';
+    if (!seven) return 'Данные раздела «Еда» временно недоступны. Остальные функции продолжают работать.';
     if (!seven.logged_days) return 'Записей питания за последние 7 завершённых дней пока нет.';
-    return `Food: ${seven.logged_days} записанных дней из 7; средний белок по записанным дням — ${seven.averages_on_logged_days.protein} г. Журнал может быть неполным.`;
+    return `Еда: ${seven.logged_days} записанных дней из 7; средний белок по записанным дням — ${seven.averages_on_logged_days.protein} г. Журнал может быть неполным.`;
   }
-  const productNames = {food:'Food', gym:'Gym Diary', supply:'Supply', bundle:'Все вместе'};
+  const productNames = {food:'Еда', gym:'Тренировки', supply:'БАДы', bundle:'Все вместе'};
   const formatDate = value => value ? new Date(value).toLocaleDateString('ru-RU') : '';
   const money = (value,currency) => currency==='RUB' ? (value/100).toLocaleString('ru-RU')+' ₽' : value.toLocaleString('ru-RU')+' ⭐';
   let subscriptionData = null, subscriptionBox = null, selectedProduct = 'bundle', subscriptionLoading = false, purchaseBusy = false, subscriptionError = '', purchaseOptionsRevision=0;
@@ -243,9 +243,9 @@
     if(id==='bundle')return openBundleOptions(box,revision);
     element('h3',productNames[id]+' · отдельная подписка',box);
     const own=subscriptionData?.products.find(p=>p.source===id);if(own)element('p',accessText(own),box);
-    element('p','Эта покупка открывает только '+productNames[id]+'. Для трёх продуктов выберите «Все вместе».',box);
+    element('p','Эта покупка открывает только раздел «'+productNames[id]+'». Для трёх продуктов выберите «Все вместе».',box);
     if(id!==source){
-      const button=element('button','Выбрать тариф '+productNames[id],box);button.type='button';button.className='progressor-pay';
+      const button=element('button','Выбрать тариф «'+productNames[id]+'»',box);button.type='button';button.className='progressor-pay';
       button.onclick=async()=>{if(await bootstrap(true)&&sessionValid()&&canNavigate()&&availableDomains.includes(id))location.assign(routes[id]+'?progressor_subscription=1');else showPaymentState(box,'Переход временно недоступен. Откройте '+productNames[id]+' из его бота.');};return;
     }
     const hook=window.ProgressorDomain;
@@ -256,7 +256,7 @@
         if(p.RUB)paymentButton(buttons,money(p.RUB,'RUB'),'RUB',p.id,async button=>{subscriptionBox.closest('#progressor-context').hidden=true;await hook.purchaseSubscription(p.id,'RUB',button);});
         if(p.XTR)paymentButton(buttons,money(p.XTR,'XTR'),'XTR',p.id,async button=>{subscriptionBox.closest('#progressor-context').hidden=true;await hook.purchaseSubscription(p.id,'XTR',button);});
       }if(!plans.length)showPaymentState(box,'Тарифы сейчас недоступны. Попробуйте позже.');
-      element('small','Рубли — платёжная страница ЮKassa. Stars — счёт Telegram. Без автоматического выбора способа оплаты.',box);
+      element('small','Рубли — платёжная страница ЮKassa. Звёзды — счёт Telegram. Без автоматического выбора способа оплаты.',box);
     }catch(_){if(revision===purchaseOptionsRevision)showPaymentState(box,'Не удалось загрузить тарифы. Попробуйте позже.');}
   }
   async function openBundleOptions(box,revision) {
@@ -288,17 +288,17 @@
               if(window.Telegram?.WebApp?.openLink)window.Telegram.WebApp.openLink(url.href);else window.open(url.href,'_blank','noopener');
               state.textContent='Открылся сайт оплаты. Подтвердите вход в свой аккаунт; сайт уточнит цену и откроет платёжную страницу ЮKassa.';return;
             }
-            state.textContent='Подготовка счёта Stars…';
+            state.textContent='Подготовка счёта в звёздах…';
             const r=await fetch('/progressor/api/v1/me/bundle/invoice',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source,plan:plan.id,order_id:crypto.randomUUID(),terms:catalog.terms_version})});if(!r.ok)throw new Error();
             const invoice=await r.json();const completed=async()=>{const result=await fetch('/progressor/api/v1/me/bundle/orders/'+encodeURIComponent(invoice.order_id),{cache:'no-store'});const v=result.ok?await result.json():{};state.textContent=v.status==='paid'?'Оплата подтверждена. Доступ обновится во всех продуктах примерно за 30 секунд.':'Оплата ещё не подтверждена. Если деньги списаны, повторно оплачивать не нужно. /paysupport';const panel=subscriptionBox.closest('#progressor-context');await bootstrap(true);await loadSubscriptions(panel);if(v.status==='paid'&&panel&&!panel.querySelector('[data-paid-link-step]')){const step=element('button','Настроить связь продуктов',panel);step.type='button';step.dataset.paidLinkStep='';step.onclick=()=>window.Progressor.openConnections();}};
             if(window.Telegram?.WebApp?.openInvoice)window.Telegram.WebApp.openInvoice(invoice.invoice_url,()=>completed().catch(()=>{state.textContent='Подтверждение появится после восстановления связи. /paysupport';}));
-            else{const link=element('a','Открыть счёт Stars в Telegram',box);link.className='progressor-pay';link.href=invoice.invoice_url;link.target='_blank';link.rel='noopener';state.textContent='Счёт готов.';}
+            else{const link=element('a','Открыть счёт в звёздах в Telegram',box);link.className='progressor-pay';link.href=invoice.invoice_url;link.target='_blank';link.rel='noopener';state.textContent='Счёт готов.';}
           });
           button.disabled=!checkbox.checked||(currency==='RUB'&&!catalog.rub_available);
           checkbox.addEventListener('change',()=>{button.disabled=purchaseBusy||!checkbox.checked||(currency==='RUB'&&!catalog.rub_available);});
         }
       }
-      element('small','Рубли — на отдельной платёжной странице ЮKassa. Stars — в Telegram. Срок и стоимость подтверждаются до оплаты; автопродления нет.',box);
+      element('small','Рубли — на отдельной платёжной странице ЮKassa. Звёзды — в Telegram. Срок и стоимость подтверждаются до оплаты; автопродления нет.',box);
     }catch(_){if(revision===purchaseOptionsRevision)notice.textContent='Персональные тарифы сейчас недоступны. Ваши подписки и текущий продукт продолжают работать.';}
   }
   async function openBundle(panel) {ensureSubscriptions(panel);const revision=++purchaseOptionsRevision;await loadSubscriptions(panel);if(revision===purchaseOptionsRevision)await selectProduct('bundle');}
@@ -380,7 +380,7 @@
     function showReturn(record){
       activeTransfer=record;transferBar.querySelectorAll('button').forEach(b=>b.remove());
       transferMessage('Открыт '+productNames[source]+'. Возврат доступен в этой вкладке 10 минут. Несохранённые формы не переносятся.');
-      const back=element('button','Вернуться в '+productNames[record.from],transferBar);back.type='button';back.dataset.progressorReturn='';
+      const back=element('button','Вернуться в раздел «'+productNames[record.from]+'»',transferBar);back.type='button';back.dataset.progressorReturn='';
       back.onclick=async()=>{
         if(back.disabled)return;back.disabled=true;const revision=interactionRevision,auth=currentAuth();
         try{
@@ -669,7 +669,7 @@
         if(!sameAuth(requestAuth))return;
         contextAuth=requestAuth;
         availableDomains = context.enabled_domains || [];
-        status.textContent = context.memberships.length ? `Личный контекст. Подключены: ${context.memberships.map(s => ({gym:'Gym',food:'Food',supply:'Supply'}[s])).join(', ')}.` : 'В этом разделе сейчас нет доступного общего контекста.';
+        status.textContent = context.memberships.length ? `Личный контекст. Подключены: ${context.memberships.map(s => ({gym:'Тренировки',food:'Еда',supply:'БАДы'}[s])).join(', ')}.` : 'В этом разделе сейчас нет доступного общего контекста.';
         lastContext=context; renderInline();
         bundle.textContent=context.access?.bundle_active?'Общая подписка · срок и тарифы':'Progressor · подписка на 3 продукта';
         const signature=JSON.stringify({memberships:context.memberships,activity:context.activity,nutrition:context.nutrition,supply:context.supply});
@@ -679,20 +679,20 @@
         content.replaceChildren();
         if (context.activity) element('p', activityText(context.activity), content);
         if (context.nutrition) element('p', nutritionText(context), content);
-        if (context.supply?.status === 'ok') element('p', `Supply: активных добавок — ${context.supply.active_supplement_count}, отмеченных приёмов — ${context.supply.recorded_intake_count}, доступных отчётов анализов — ${context.supply.lab_report_count}.`, content);
-        for (const recommendation of context.recommendations || []) { element('strong', recommendation.title, content); element('p', recommendation.message, content); element('p', recommendation.uncertainty, content); const link = element('a', 'Проверить журнал Food', content); link.href = routes.food; link.addEventListener('click', async e => { e.preventDefault(); if (await bootstrap() && canNavigate()) location.assign(routes.food); }); }
+        if (context.supply?.status === 'ok') element('p', `БАДы: активных добавок — ${context.supply.active_supplement_count}, отмеченных приёмов — ${context.supply.recorded_intake_count}, доступных отчётов анализов — ${context.supply.lab_report_count}.`, content);
+        for (const recommendation of context.recommendations || []) { element('strong', recommendation.title, content); element('p', recommendation.message, content); element('p', recommendation.uncertainty, content); const link = element('a', 'Проверить дневник питания', content); link.href = routes.food; link.addEventListener('click', async e => { e.preventDefault(); if (await bootstrap() && canNavigate()) location.assign(routes.food); }); }
         const nutrients = context.nutrition?.history?.['7']?.nutrients || {};
         const codes = Object.keys(nutrients);
-        if (codes.length) { const details = element('details', undefined, content); element('summary', 'Нутриенты из записей Food', details); for (const code of codes) { const n = nutrients[code]; element('p', `${n.name || code}: ${n.average_on_observed_days} ${n.unit === 'ug' ? 'мкг' : n.unit === 'mg' ? 'мг' : 'г'} по ${n.observed_days} дням с данными; ${n.observed_meals} из ${n.logged_meals} приёмов пищи. Для порций с оценкой известен состав ${n.observed_components} из ${n.assessed_components} продуктов. Значения приблизительные, пропуски не считаются нулём.`, details); } }
-        else if (context.nutrition) element('p', 'В этих записях Food пока нет оценки дополнительных нутриентов. Новые фото и описания сохраняют состав автоматически. Отсутствие данных не означает нулевое потребление.', content);
+        if (codes.length) { const details = element('details', undefined, content); element('summary', 'Нутриенты из записей питания', details); for (const code of codes) { const n = nutrients[code]; element('p', `${n.name || code}: ${n.average_on_observed_days} ${n.unit === 'ug' ? 'мкг' : n.unit === 'mg' ? 'мг' : 'г'} по ${n.observed_days} дням с данными; ${n.observed_meals} из ${n.logged_meals} приёмов пищи. Для порций с оценкой известен состав ${n.observed_components} из ${n.assessed_components} продуктов. Значения приблизительные, пропуски не считаются нулём.`, details); } }
+        else if (context.nutrition) element('p', 'В этих записях питания пока нет оценки дополнительных нутриентов. Новые фото и описания сохраняют состав автоматически. Отсутствие данных не означает нулевое потребление.', content);
         if (context.supply?.active_supplements?.length || context.supply?.lab_reports?.length) {
-          const details = element('details', undefined, content); element('summary', 'Добавки и анализы из Supply', details);
+          const details = element('details', undefined, content); element('summary', 'Добавки и анализы из раздела «БАДы»', details);
           for (const item of context.supply.active_supplements || []) element('p', `${item.name}${item.reported_dose_text ? ' · ' + item.reported_dose_text : ''}`, details);
           for (const report of context.supply.lab_reports || []) { element('p', `Отчёт ${report.report_date || 'без даты'} · ${report.observation_count} показателей · статус ${report.confirmation_state}`, details); for (const value of report.observations || []) element('p', `${value.name}: ${value.value ?? value.value_text ?? 'нет данных'} ${value.unit}`, details); }
           element('small', context.supply.uncertainty, details);
         }
         content.querySelectorAll('details').forEach((d,i)=>{d.open=!!expanded[i];});
-        if (context.memberships.length) element('small', 'Источники: ' + context.memberships.map(s => ({gym:'Gym',food:'Food',supply:'Supply'}[s])).join(', ') + '. Изменения обычно появляются в течение минуты; выводы учитывают полноту записей.', content);
+        if (context.memberships.length) element('small', 'Источники: ' + context.memberships.map(s => ({gym:'Тренировки',food:'Еда',supply:'БАДы'}[s])).join(', ') + '. Изменения обычно появляются в течение минуты; выводы учитывают полноту записей.', content);
       } catch (_) { status.textContent = 'Общий контекст временно недоступен. Текущий раздел продолжает работать.'; lastContext=null; renderInline();if(initialContextRetries++<2)setTimeout(loadContext,2500); }
       finally { clearTimeout(timeout); loading = false; nav.querySelectorAll('a').forEach(a => a.setAttribute('aria-disabled', String(a.dataset.domain !== source && (!sessionValid() || !canNavigate() || !availableDomains.includes(a.dataset.domain))))); }
     }

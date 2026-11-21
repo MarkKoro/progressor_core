@@ -82,7 +82,7 @@ def gym(db):
                 if not trainee or not coach:continue
                 entities.append(entity('profile:coach:'+str(link['id']),trainee['tg_id'],'profile.updated',instant(link['created_at']),
                     profile_kind='coach_link',link_id=str(link['id']),coach_id=subject(coach['tg_id']),
-                    coach_enabled=bool(link['is_trainer']),status=link['status'],label='Тренер Gym Diary'))
+                    coach_enabled=bool(link['is_trainer']),status=link['status'],label='Тренер в разделе «Тренировки»'))
     seen_sessions=set(); represented_sessions=set()
     from .workout_time import GymFreeTime, canonical_clock
     free_times = GymFreeTime(db, users)

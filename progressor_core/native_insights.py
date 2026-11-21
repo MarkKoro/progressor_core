@@ -76,7 +76,7 @@ def native_hints(data, entities, now, day, *, food_preferences=None):
         message+=' Цель питания не менялась.'
         hints.append({**base,'key':'workout_today.v1','targets':['food']+(['gym'] if source('food') else []),'priority':10,'title':title,'message':message,
                       'action':{'kind':'food_log','label':'Проверить питание'},'basis':activity['provenance']+(seven.get('provenance',[]) if source('food') and seven.get('logged_days',0)>=3 else []),
-                      'details':'Проверьте, все ли блюда внесены. Обычная активность уже может входить в вашу цель питания. Оценка зависит от длительности, веса, темпа и пауз; это диапазон модели, не измерение. Без записанной длительности/подходящего профиля калории не вычисляются. Средние по питанию учитывают записанные дни за последнюю завершённую неделю. Цель Food автоматически не меняется.'})
+                      'details':'Проверьте, все ли блюда внесены. Обычная активность уже может входить в вашу цель питания. Оценка зависит от длительности, веса, темпа и пауз; это диапазон модели, не измерение. Без записанной длительности/подходящего профиля калории не вычисляются. Средние по питанию учитывают записанные дни за последнюю завершённую неделю. Цель питания автоматически не меняется.'})
     protein=seven.get('averages_on_logged_days',{}).get('protein'); goal=targets.get('protein')
     low_protein=source('food') and seven.get('logged_days',0)>=3 and goal and protein is not None and protein<goal*.8
     training=[e for e in entities if known_workout(e,completed=True,now=now)
@@ -108,7 +108,7 @@ def native_hints(data, entities, now, day, *, food_preferences=None):
             foods=('Под ваши предпочтения: '+ '; '.join(i['name'] for i in atlas['items'][:3])+'.') if atlas['items'] else 'Под ваши исключения подтверждённых пищевых примеров пока нет; новый источник не выдумываем.'
             hints.append({**base,'key':'food_sources_'+code+'.v1','targets':['food']+(['supply'] if supply and source('supply') else []),'priority':15,
                 'title':'Источники '+name+' в рационе',
-                'message':f"За {seven['logged_days']} дней в записанных блюдах оценка {name} невысокая. {foods}"+(' В Supply уже есть соответствующая добавка; её дозу мы не складываем с едой.' if already else ''),
+                'message':f"За {seven['logged_days']} дней в записанных блюдах оценка {name} невысокая. {foods}"+(' В разделе «БАДы» уже есть соответствующая добавка; её дозу мы не складываем с едой.' if already else ''),
                 'action':{'kind':'open_food','label':'Проверить блюда'},
                 'secondary_action':None if already or not supply else {'kind':'supply_catalog','targets':['supply'],'query':'железо' if code=='iron' else 'B12','label':'Уже принимаю — добавить'},
                 'basis':seven.get('provenance',[]),'details':f"Средняя оценка на записанных днях: {n['average_on_observed_days']:g} {'мг' if unit=='mg' else 'мкг'}. Пропущенные блюда неизвестны; состав пищи оценён приблизительно. Подсказка не устанавливает дефицит организма. Железо не следует начинать по дневнику без оценки необходимости; дозы здесь не назначаются. Кнопка предназначена для записи уже выбранного приёма."})

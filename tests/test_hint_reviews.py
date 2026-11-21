@@ -232,7 +232,7 @@ class HintReviews(unittest.TestCase):
         self.event('supply', 'profile:health:55', 'profile.updated',
                    {'profile_kind': 'reported_health', 'reported_profile': {'weight_kg': 78, 'height_cm': 180}})
         weight = self.change('food', 'change_weight.v1')
-        self.assertEqual(weight['action'], {'kind': 'food_goal', 'label': 'Проверить цель Food'})
+        self.assertEqual(weight['action'], {'kind': 'food_goal', 'label': 'Проверить цель питания'})
         self.profile('supply', consent_given=False)
         self.assertEqual(self.review(weight, 'food').status_code, 422)
         self.assertEqual(self.receipts(), [])
