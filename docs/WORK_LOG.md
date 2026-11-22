@@ -564,3 +564,15 @@ and logic keys and were deliberately left for a separate migration.
 Evidence: Linux suites on the server with temporary databases — Core 501,
 Food 220, Gym 268, Supply 125, all OK; Node connection_readiness (59) and
 journey_navigation pass. Playwright UI suites and physical devices were not run.
+
+## 2026-11-22 — Home screen without subscriptions: no "null", tiles fit
+
+Absent home blocks (water, ask, rest/link, week) were passed to
+DOM `replaceChildren`, which prints `null` as text; people without Food access
+saw "nullnull" under the tiles and "null" near the footer (also anyone with no
+weekly summary). Only real nodes are rendered now. Locked tiles stack
+«Подключить» / «Все три» vertically; tile button rows wrap instead of
+squeezing icon buttons below 44px (the original squeezed them to 23px at 390px).
+Evidence: local browser harness with stubbed APIs at 320/360/390 CSS px for no,
+one and all subscriptions — no "null", no horizontal overflow; Node
+connection_readiness (59) and journey_navigation pass. Not run on a phone.

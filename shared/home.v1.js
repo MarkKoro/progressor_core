@@ -466,7 +466,8 @@
     const streakChip = streak && streak.days > 0 ? h('div', {class: 'ph-streak' + (streak.today_recorded ? '' : ' wait'), role: 'img', 'aria-label': `Серия: ${streak.days} дн. подряд` + (streak.today_recorded ? '' : ', сегодня ещё нет записей')},
       h('b', null, String(streak.days)), h('span', null, streak.today_recorded ? 'дн. подряд' : 'серия ждёт')) : null;
     body.classList.toggle('ph-settled', painted); painted = true;
-    body.replaceChildren(
+    // DOM replaceChildren would print an absent block as the text "null"; only real nodes go in.
+    body.replaceChildren(...[
       h('header', null, h('h1', null, name ? 'Привет, ' + name : 'Сегодня'), h('div', {class: 'ph-head-right'}, streakChip,
         h('button', {type: 'button', class: 'ph-idx', 'aria-label': (index === null ? 'Данных за сегодня пока нет' : `Биомашина считана на ${index} процентов`) + '. Открыть разбор по системам', onclick: openMachine}, h('b', null, index === null ? '—' : String(index)), h('span', null, 'биомашина')))),
       h('div', {class: 'ph-grid'}, gym, food, supply), waterRow,
@@ -474,7 +475,7 @@
       restNote || link, weekBlock,
       h('div', {class: 'ph-foot'}, state.links ? h('button', {type: 'button', class: 'ph-textlink', onclick: toggleRest}, state.links.rest_active ? 'Закончить отдых' : 'Сегодня отдых') : null,
         h('button', {type: 'button', class: 'ph-textlink', onclick: openThemes}, 'Оформление'),
-        h('button', {type: 'button', class: 'ph-textlink', onclick: () => { hide(); window.Progressor.openSubscriptions?.(); }}, 'Подписки')));
+        h('button', {type: 'button', class: 'ph-textlink', onclick: () => { hide(); window.Progressor.openSubscriptions?.(); }}, 'Подписки'))].filter(child => child != null));
   }
   function build() {
     const style = h('style');
@@ -515,14 +516,18 @@
 #progressor-home .sp{background:linear-gradient(160deg,#8AC4FF,#6FB6FF 55%);color:#06254A;box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 6px 0 #4E9BEA,0 20px 28px -14px rgba(111,182,255,.8);grid-column:span 2;display:flex;align-items:center;gap:14px;cursor:pointer}
 #progressor-home .sp h2{margin:0}#progressor-home .ph-grow{flex:1;min-width:0}
 #progressor-home .ph-locked{background:var(--pg-surface,#F3F4F7);color:var(--pg-text,#10131A);box-shadow:0 6px 0 var(--pg-line,#E0E4EA);cursor:default;display:block}
+#progressor-home .ph-locked .ph-btns{flex-direction:column}#progressor-home .ph-locked .ph-btn{width:100%;white-space:normal;text-align:center}
+#progressor-home .ph-tile h2,#progressor-home .ph-tile p{overflow-wrap:anywhere}
 #progressor-home .ph-lock{width:56px;height:56px;border-radius:50%;background:var(--pg-line,#E0E4EA);display:flex;align-items:center;justify-content:center}
 #progressor-home .ph-ring svg{display:block;width:56px;height:56px}
 #progressor-home .ph-ring circle{fill:none;stroke:currentColor;stroke-width:7;stroke-linecap:round}
 #progressor-home .ph-ring .ph-track{opacity:.22}
 #progressor-home .ph-ring text{font-size:13px;font-weight:700;fill:currentColor}
-#progressor-home .ph-btns{display:flex;gap:6px;margin-top:12px}
+#progressor-home .ph-btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
 #progressor-home .ph-btn{border:0;font:inherit;font-weight:600;font-size:14px;color:inherit;background:rgba(0,0,0,.16);border-radius:14px;padding:10px 12px;display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;min-height:44px}
-#progressor-home .ph-btn.grow{flex:1}#progressor-home .ph-btn.ico{width:44px;padding:0}
+#progressor-home .ph-btn.grow{flex:1 1 auto}#progressor-home .ph-btn.ico{width:44px;padding:0;flex:none}
+#progressor-home .ph-tile .ph-btn{padding:10px 8px}#progressor-home .ph-tile .ph-btn.ico{padding:0}
+#progressor-home .fd .ph-btns .ph-btn.grow{flex-basis:100%}
 #progressor-home .ph-btn.dark{background:var(--pg-ink,#10131A);color:var(--pg-on-ink,#fff)}#progressor-home .ph-btn.light{background:var(--pg-surface,#F3F4F7);color:var(--pg-text,#10131A)}
 #progressor-home .ph-textlink{border:0;background:none;color:inherit;font:inherit;font-size:13px;text-decoration:underline;padding:14px 0;cursor:pointer;opacity:.75}
 #progressor-home .ph-spin{width:38px;height:38px;border-radius:50%;border:4px solid var(--pg-line,#E6E9EF);border-top-color:#3FC585;animation:ph-r .8s linear infinite;margin:26px auto}
